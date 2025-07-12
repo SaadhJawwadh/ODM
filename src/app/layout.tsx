@@ -5,7 +5,7 @@ import NotificationContainer from '@/components/NotificationContainer'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = {
-    title: 'YT-DLP Download Manager',
+    title: 'ODM: One Download Manager',
     description: 'A modern download manager powered by yt-dlp',
 }
 

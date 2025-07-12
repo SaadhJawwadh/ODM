@@ -1,4 +1,4 @@
-# YT-DLP Download Manager
+# ODM: One Download Manager
 
 A modern, web-based download manager powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp) and built with Next.js. Download videos and audio from thousands of platforms with a beautiful, intuitive interface.
 
@@ -81,8 +81,8 @@ sudo pacman -S yt-dlp
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/yt-dlp-download-manager.git
-cd yt-dlp-download-manager
+git clone https://github.com/yourusername/odm-one-download-manager.git
+cd odm-one-download-manager
 ```
 
 2. **Install dependencies**
@@ -246,7 +246,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 If you encounter any issues or have questions:
 
 1. Check the [yt-dlp documentation](https://github.com/yt-dlp/yt-dlp#readme)
-2. Search existing [issues](https://github.com/yourusername/yt-dlp-download-manager/issues)
+2. Search existing [issues](https://github.com/yourusername/odm-one-download-manager/issues)
 3. Create a new issue with detailed information
 
 ## Disclaimer

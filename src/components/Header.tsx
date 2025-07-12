@@ -30,7 +30,7 @@ export default function Header({ onSettingsClick }: HeaderProps) {
                         </div>
                         <div className="min-w-0">
                             <h1 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white truncate">
-                                YT-DLP Manager
+                                ODM: One Download Manager
                             </h1>
                             <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 hidden sm:block">
                                 Download from any platform
