@@ -21,19 +21,25 @@ export interface DownloadItem {
     thumbnails?: boolean
 }
 
-export interface VideoInfo {
-    id: string
-    title: string
-    description: string
-    thumbnail: string
-    duration: string
-    uploader: string
-    upload_date: string
-    formats: VideoFormat[]
-    url: string
+export interface VideoFormat {
+    format_id: string
+    ext: string
+    quality: string
+    resolution?: string
+    filesize?: number
+    filesizeFormatted: string
+    tbr?: number
+    vbr?: number
+    abr?: number
+    fps?: number
+    vcodec?: string
+    acodec?: string
+    format_note?: string
+    hasAudio: boolean
+    hasVideo: boolean
 }
 
-export interface VideoFormat {
+export interface LegacyVideoFormat {
     format_id: string
     ext: string
     quality: string
@@ -45,6 +51,42 @@ export interface VideoFormat {
     width?: number
     height?: number
     format_note?: string
+}
+
+export interface CategorizedFormats {
+    video: VideoFormat[]
+    audio: VideoFormat[]
+}
+
+export interface EstimatedSizes {
+    '1080p': string
+    '720p': string
+    '480p': string
+    'audio': string
+}
+
+export interface VideoMetadata {
+    viewCount?: number
+    likeCount?: number
+    uploadDate?: string
+    categories?: string[]
+    tags?: string[]
+}
+
+export interface VideoInfo {
+    id: string
+    title: string
+    description: string
+    thumbnail: string
+    duration: string
+    uploader: string
+    upload_date: string
+    url: string
+    contentType: 'video' | 'audio'
+    estimatedSizes: EstimatedSizes
+    formats: CategorizedFormats
+    legacyFormats: LegacyVideoFormat[]
+    metadata: VideoMetadata
 }
 
 export interface DownloadProgress {
