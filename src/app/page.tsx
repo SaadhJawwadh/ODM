@@ -12,12 +12,12 @@ import Settings from '@/components/Settings'
 export default function Home() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false)
     const [filter, setFilter] = useState<'all' | 'downloading' | 'completed' | 'error'>('all')
-    const { downloads, updateDownload, clearCompleted } = useDownloadStore()
+    const { downloads, updateDownload, clearCompleted, startBrowserDownload } = useDownloadStore()
 
     // Poll for download progress updates
     useEffect(() => {
         const activeDownloads = downloads.filter(d =>
-            d.status === 'downloading' || d.status === 'pending'
+            d.status === 'downloading' || d.status === 'pending' || d.status === 'ready'
         )
 
         if (activeDownloads.length === 0) return
@@ -28,16 +28,25 @@ export default function Home() {
                     const response = await fetch(`/api/download/start?id=${download.id}`)
                     if (response.ok) {
                         const data = await response.json()
+
+                        // Update download status
                         updateDownload(download.id, {
                             status: data.status,
-                            progress: data.progress,
-                            speed: data.speed,
-                            eta: data.eta,
-                            error: data.error,
-                            filePath: data.filePath,
-                            fileName: data.fileName,
-                            fileSize: data.fileSize
+                            progress: data.progress || 0,
+                            speed: data.speed || '',
+                            eta: data.eta || '',
+                            error: data.error || '',
+                            fileName: data.fileName || '',
+                            fileSize: data.fileSize || ''
                         })
+
+                        // Auto-start ready downloads
+                        if (data.status === 'ready' && download.status !== 'ready') {
+                            // Small delay to ensure UI updates, then start download
+                            setTimeout(() => {
+                                startBrowserDownload(download.id)
+                            }, 1000)
+                        }
                     }
                 } catch (error) {
                     console.error('Error fetching download progress:', error)
@@ -46,13 +55,13 @@ export default function Home() {
         }, 2000) // Poll every 2 seconds
 
         return () => clearInterval(interval)
-    }, [downloads, updateDownload])
+    }, [downloads, updateDownload, startBrowserDownload])
 
     // Filter downloads based on selected filter
     const filteredDownloads = downloads.filter(download => {
         switch (filter) {
             case 'downloading':
-                return download.status === 'downloading' || download.status === 'pending'
+                return download.status === 'downloading' || download.status === 'pending' || download.status === 'ready'
             case 'completed':
                 return download.status === 'completed'
             case 'error':
@@ -65,7 +74,9 @@ export default function Home() {
     // Get download statistics
     const stats = {
         total: downloads.length,
-        downloading: downloads.filter(d => d.status === 'downloading' || d.status === 'pending').length,
+        downloading: downloads.filter(d =>
+            d.status === 'downloading' || d.status === 'pending' || d.status === 'ready'
+        ).length,
         completed: downloads.filter(d => d.status === 'completed').length,
         error: downloads.filter(d => d.status === 'error').length
     }
@@ -109,7 +120,7 @@ export default function Home() {
                             <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
                                 {stats.downloading}
                             </div>
-                            <div className="text-sm text-blue-600 dark:text-blue-400">Downloading</div>
+                            <div className="text-sm text-blue-600 dark:text-blue-400">Active</div>
                         </div>
                         <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4">
                             <div className="text-2xl font-bold text-green-600 dark:text-green-400">
@@ -140,8 +151,8 @@ export default function Home() {
                                     key={key}
                                     onClick={() => setFilter(key as any)}
                                     className={`px-3 py-1 rounded-lg text-sm transition-colors ${filter === key
-                                            ? 'bg-primary-100 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
-                                            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-700'
+                                        ? 'bg-primary-100 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-700'
                                         }`}
                                 >
                                     {label}

@@ -4,7 +4,7 @@ import { motion } from 'framer-motion'
 
 interface ProgressBarProps {
     progress: number
-    status: 'pending' | 'downloading' | 'completed' | 'error' | 'paused'
+    status: 'pending' | 'downloading' | 'completed' | 'error' | 'paused' | 'ready'
     className?: string
 }
 
@@ -19,6 +19,8 @@ export default function ProgressBar({ progress, status, className = '' }: Progre
                 return 'bg-gradient-to-r from-red-500 to-red-600'
             case 'paused':
                 return 'bg-gradient-to-r from-yellow-500 to-yellow-600'
+            case 'ready':
+                return 'bg-gradient-to-r from-blue-400 to-blue-500'
             default:
                 return 'bg-gradient-to-r from-gray-400 to-gray-500'
         }
@@ -27,6 +29,7 @@ export default function ProgressBar({ progress, status, className = '' }: Progre
     const getProgressWidth = () => {
         if (status === 'pending') return 0
         if (status === 'error') return 100
+        if (status === 'ready') return 100
         return Math.min(Math.max(progress, 0), 100)
     }
 

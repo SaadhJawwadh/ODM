@@ -6,7 +6,7 @@ export interface DownloadItem {
     duration?: string
     format: string
     quality: string
-    status: 'pending' | 'downloading' | 'completed' | 'error' | 'paused'
+    status: 'pending' | 'downloading' | 'completed' | 'error' | 'paused' | 'ready'
     progress: number
     speed?: string
     eta?: string

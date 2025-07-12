@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Play, Pause, X, Download, Clock, CheckCircle, XCircle, AlertCircle, Eye, FolderOpen, HardDrive } from 'lucide-react'
+import { Play, Pause, X, Download, Clock, CheckCircle, XCircle, AlertCircle, Eye, FolderOpen, HardDrive, Trash2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { DownloadItem as DownloadItemType } from '@/types'
 import { useDownloadStore } from '@/store/downloadStore'
@@ -19,7 +19,7 @@ export default function DownloadItem({ download }: DownloadItemProps) {
         type: 'info',
         visible: false
     })
-    const { updateDownload, removeDownload } = useDownloadStore()
+    const { pauseDownload, resumeDownload, cancelDownload, deleteDownload, startBrowserDownload } = useDownloadStore()
 
     const showToast = (message: string, type: 'success' | 'error' | 'info') => {
         setToast({ message, type, visible: true })
@@ -28,18 +28,9 @@ export default function DownloadItem({ download }: DownloadItemProps) {
     const handlePause = async () => {
         if (isLoading) return
         setIsLoading(true)
-
         try {
-            const response = await fetch('/api/download/control', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: download.id, action: 'pause' })
-            })
-
-            if (response.ok) {
-                updateDownload(download.id, { status: 'paused' })
-                showToast('Download paused', 'info')
-            }
+            await pauseDownload(download.id)
+            showToast('Download paused', 'info')
         } catch (error) {
             console.error('Error pausing download:', error)
             showToast('Failed to pause download', 'error')
@@ -51,18 +42,9 @@ export default function DownloadItem({ download }: DownloadItemProps) {
     const handleResume = async () => {
         if (isLoading) return
         setIsLoading(true)
-
         try {
-            const response = await fetch('/api/download/control', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: download.id, action: 'resume' })
-            })
-
-            if (response.ok) {
-                updateDownload(download.id, { status: 'downloading' })
-                showToast('Download resumed', 'info')
-            }
+            await resumeDownload(download.id)
+            showToast('Download resumed', 'info')
         } catch (error) {
             console.error('Error resuming download:', error)
             showToast('Failed to resume download', 'error')
@@ -74,18 +56,9 @@ export default function DownloadItem({ download }: DownloadItemProps) {
     const handleCancel = async () => {
         if (isLoading) return
         setIsLoading(true)
-
         try {
-            const response = await fetch('/api/download/control', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: download.id, action: 'cancel' })
-            })
-
-            if (response.ok) {
-                removeDownload(download.id)
-                showToast('Download cancelled', 'info')
-            }
+            await cancelDownload(download.id)
+            showToast('Download cancelled', 'info')
         } catch (error) {
             console.error('Error canceling download:', error)
             showToast('Failed to cancel download', 'error')
@@ -94,30 +67,29 @@ export default function DownloadItem({ download }: DownloadItemProps) {
         }
     }
 
-    const handleFileOperation = async (action: 'open-file' | 'open-location') => {
-        if (!download.filePath) {
-            showToast('File path not available', 'error')
-            return
-        }
-
+    const handleDelete = async () => {
+        if (isLoading) return
         setIsLoading(true)
         try {
-            const response = await fetch('/api/files/open', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action, filePath: download.filePath })
-            })
-
-            if (response.ok) {
-                const actionText = action === 'open-file' ? 'File opened' : 'File location opened'
-                showToast(actionText, 'success')
-            } else {
-                const error = await response.json()
-                showToast(error.error || 'File operation failed', 'error')
-            }
+            await deleteDownload(download.id)
+            showToast('Download deleted', 'info')
         } catch (error) {
-            console.error('Error with file operation:', error)
-            showToast('Failed to perform file operation', 'error')
+            console.error('Error deleting download:', error)
+            showToast('Failed to delete download', 'error')
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    const handleStartDownload = async () => {
+        if (isLoading) return
+        setIsLoading(true)
+        try {
+            await startBrowserDownload(download.id)
+            showToast('Download started', 'info')
+        } catch (error) {
+            console.error('Error starting download:', error)
+            showToast('Failed to start download', 'error')
         } finally {
             setIsLoading(false)
         }
@@ -127,6 +99,8 @@ export default function DownloadItem({ download }: DownloadItemProps) {
         switch (download.status) {
             case 'pending':
                 return <Clock className="w-4 h-4 text-gray-500" />
+            case 'ready':
+                return <CheckCircle className="w-4 h-4 text-blue-500" />
             case 'downloading':
                 return <Download className="w-4 h-4 text-blue-500 animate-bounce" />
             case 'completed':
@@ -143,7 +117,9 @@ export default function DownloadItem({ download }: DownloadItemProps) {
     const getStatusText = () => {
         switch (download.status) {
             case 'pending':
-                return 'Pending'
+                return 'Preparing...'
+            case 'ready':
+                return 'Ready to download'
             case 'downloading':
                 return `Downloading ${download.progress}%`
             case 'completed':
@@ -217,28 +193,17 @@ export default function DownloadItem({ download }: DownloadItemProps) {
 
                             {/* Controls */}
                             <div className="flex items-center space-x-2 ml-4">
-                                {/* File Operations for Completed Downloads */}
-                                {download.status === 'completed' && download.filePath && (
-                                    <>
-                                        <button
-                                            onClick={() => handleFileOperation('open-file')}
-                                            disabled={isLoading}
-                                            className="p-2 rounded-lg bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/40 text-green-600 dark:text-green-400 disabled:opacity-50 transition-colors"
-                                            aria-label="Preview file"
-                                            title="Preview file"
-                                        >
-                                            <Eye className="w-4 h-4" />
-                                        </button>
-                                        <button
-                                            onClick={() => handleFileOperation('open-location')}
-                                            disabled={isLoading}
-                                            className="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 disabled:opacity-50 transition-colors"
-                                            aria-label="Open file location"
-                                            title="Open file location"
-                                        >
-                                            <FolderOpen className="w-4 h-4" />
-                                        </button>
-                                    </>
+                                {/* Start Download Button for Ready Status */}
+                                {download.status === 'ready' && (
+                                    <button
+                                        onClick={handleStartDownload}
+                                        disabled={isLoading}
+                                        className="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 disabled:opacity-50 transition-colors"
+                                        aria-label="Start download"
+                                        title="Start download"
+                                    >
+                                        <Download className="w-4 h-4" />
+                                    </button>
                                 )}
 
                                 {/* Download Controls */}
@@ -264,7 +229,23 @@ export default function DownloadItem({ download }: DownloadItemProps) {
                                     </button>
                                 )}
 
-                                {download.status !== 'completed' && (
+                                {/* File Operations for Completed Downloads */}
+                                {download.status === 'completed' && (
+                                    <>
+                                        <button
+                                            onClick={() => showToast('File downloaded to your browser downloads folder', 'info')}
+                                            disabled={isLoading}
+                                            className="p-2 rounded-lg bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/40 text-green-600 dark:text-green-400 disabled:opacity-50 transition-colors"
+                                            aria-label="Download location"
+                                            title="File saved to browser downloads"
+                                        >
+                                            <FolderOpen className="w-4 h-4" />
+                                        </button>
+                                    </>
+                                )}
+
+                                {/* Cancel Button for Active Downloads */}
+                                {(download.status === 'pending' || download.status === 'downloading' || download.status === 'paused') && (
                                     <button
                                         onClick={handleCancel}
                                         disabled={isLoading}
@@ -274,6 +255,17 @@ export default function DownloadItem({ download }: DownloadItemProps) {
                                         <X className="w-4 h-4" />
                                     </button>
                                 )}
+
+                                {/* Delete Button for All Downloads */}
+                                <button
+                                    onClick={handleDelete}
+                                    disabled={isLoading}
+                                    className="p-2 rounded-lg bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 disabled:opacity-50 transition-colors"
+                                    aria-label="Delete download"
+                                    title="Delete from list"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
                             </div>
                         </div>
 
@@ -316,9 +308,25 @@ export default function DownloadItem({ download }: DownloadItemProps) {
                             <div className="mt-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
                                 <div className="flex items-center space-x-2 text-sm text-green-700 dark:text-green-400">
                                     <HardDrive className="w-4 h-4" />
-                                    <span className="font-medium">File saved:</span>
+                                    <span className="font-medium">File downloaded:</span>
                                     <span className="truncate">{download.fileName}</span>
                                 </div>
+                                <p className="text-xs text-green-600 dark:text-green-500 mt-1">
+                                    Check your browser's download folder
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Ready Status Info */}
+                        {download.status === 'ready' && (
+                            <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                                <div className="flex items-center space-x-2 text-sm text-blue-700 dark:text-blue-400">
+                                    <Download className="w-4 h-4" />
+                                    <span className="font-medium">Ready to download</span>
+                                </div>
+                                <p className="text-xs text-blue-600 dark:text-blue-500 mt-1">
+                                    Click the download button to start
+                                </p>
                             </div>
                         )}
 

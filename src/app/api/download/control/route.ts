@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 // Import the shared activeDownloads map
-// Note: In a production app, this should be stored in a database or Redis
-// For now, we'll create a simple module to share the state
 let activeDownloads: Map<string, any>
 
 // Get the shared downloads map from the start route
 try {
-    // This is a workaround to share state between API routes
     if (typeof global !== 'undefined') {
         if (!global.activeDownloads) {
             global.activeDownloads = new Map()
@@ -35,23 +32,36 @@ export async function POST(request: NextRequest) {
 
         switch (action) {
             case 'pause':
-                if (download.process && !download.process.killed) {
-                    // Use SIGTERM for Windows compatibility
-                    download.process.kill('SIGTERM')
+                if (download.status === 'downloading') {
                     download.status = 'paused'
+                    download.abortController?.abort()
                 }
                 break
 
             case 'resume':
-                // Resume is not directly supported with yt-dlp
-                // We would need to restart the download
-                download.status = 'pending'
+                if (download.status === 'paused') {
+                    download.status = 'ready'
+                    // Frontend will handle resuming the download
+                }
                 break
 
             case 'cancel':
+                // Kill the preparation process if still running
                 if (download.process && !download.process.killed) {
                     download.process.kill('SIGTERM')
                 }
+
+                // Abort any active download
+                if (download.abortController) {
+                    download.abortController.abort()
+                }
+
+                // Remove from active downloads
+                activeDownloads.delete(id)
+                break
+
+            case 'delete':
+                // Delete the download record
                 activeDownloads.delete(id)
                 break
 
@@ -59,7 +69,11 @@ export async function POST(request: NextRequest) {
                 return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
         }
 
-        return NextResponse.json({ success: true, id, action, status: download.status })
+        const responseData = action === 'cancel' || action === 'delete'
+            ? { success: true, id, action, deleted: true }
+            : { success: true, id, action, status: download.status }
+
+        return NextResponse.json(responseData)
     } catch (error) {
         console.error('Download control error:', error)
         return NextResponse.json({ error: 'Failed to control download' }, { status: 500 })
@@ -74,7 +88,10 @@ export async function GET() {
             progress: download.progress,
             speed: download.speed,
             eta: download.eta,
-            error: download.error
+            error: download.error,
+            fileName: download.fileName,
+            fileSize: download.fileSize,
+            downloadUrl: download.downloadUrl
         }))
 
         return NextResponse.json({ downloads })
