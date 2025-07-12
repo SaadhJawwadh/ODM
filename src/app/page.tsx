@@ -85,13 +85,13 @@ export default function Home() {
         <div className="min-h-screen bg-gray-50 dark:bg-dark-900">
             <Header onSettingsClick={() => setIsSettingsOpen(true)} />
 
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
                 {/* Download Form */}
                 <DownloadForm />
 
                 {/* Stats and Controls */}
-                <div className="bg-white dark:bg-dark-800 rounded-xl card-shadow p-6 mb-6">
-                    <div className="flex items-center justify-between mb-4">
+                <div className="bg-white dark:bg-dark-800 rounded-xl card-shadow p-4 sm:p-6 mb-4 sm:mb-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                         <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
                             Downloads
                         </h2>
@@ -99,7 +99,7 @@ export default function Home() {
                             {stats.completed > 0 && (
                                 <button
                                     onClick={clearCompleted}
-                                    className="flex items-center space-x-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                                    className="flex items-center space-x-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors touch-manipulation min-h-[40px]"
                                 >
                                     <Trash2 className="w-4 h-4" />
                                     <span>Clear Completed</span>
@@ -109,7 +109,7 @@ export default function Home() {
                     </div>
 
                     {/* Stats */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
                         <div className="bg-gray-50 dark:bg-dark-700 rounded-lg p-4">
                             <div className="text-2xl font-bold text-gray-900 dark:text-white">
                                 {stats.total}
@@ -137,10 +137,12 @@ export default function Home() {
                     </div>
 
                     {/* Filters */}
-                    <div className="flex items-center space-x-2">
-                        <Filter className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                        <span className="text-sm text-gray-700 dark:text-gray-300">Filter:</span>
-                        <div className="flex space-x-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-2">
+                        <div className="flex items-center space-x-2">
+                            <Filter className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                            <span className="text-sm text-gray-700 dark:text-gray-300">Filter:</span>
+                        </div>
+                        <div className="grid grid-cols-4 sm:flex gap-2">
                             {[
                                 { key: 'all', label: 'All' },
                                 { key: 'downloading', label: 'Active' },
@@ -150,7 +152,7 @@ export default function Home() {
                                 <button
                                     key={key}
                                     onClick={() => setFilter(key as any)}
-                                    className={`px-3 py-1 rounded-lg text-sm transition-colors ${filter === key
+                                    className={`px-3 py-2 rounded-lg text-sm transition-colors touch-manipulation min-h-[40px] flex items-center justify-center ${filter === key
                                         ? 'bg-primary-100 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
                                         : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-700'
                                         }`}

@@ -53,22 +53,23 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: '100%' }}
                         transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-                        className="fixed right-0 top-0 h-full w-96 bg-white dark:bg-dark-800 border-l border-gray-200 dark:border-dark-700 shadow-xl z-50 overflow-y-auto"
+                        className="fixed right-0 top-0 h-full w-full sm:w-96 max-w-md bg-white dark:bg-dark-800 border-l border-gray-200 dark:border-dark-700 shadow-xl z-50 overflow-y-auto"
                     >
                         {/* Header */}
-                        <div className="sticky top-0 bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-700 px-6 py-4">
+                        <div className="sticky top-0 bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-700 px-4 sm:px-6 py-4">
                             <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-3">
-                                    <div className="bg-gradient-to-r from-primary-500 to-primary-600 p-2 rounded-lg">
+                                <div className="flex items-center space-x-3 min-w-0">
+                                    <div className="bg-gradient-to-r from-primary-500 to-primary-600 p-2 rounded-lg flex-shrink-0">
                                         <SettingsIcon className="w-5 h-5 text-white" />
                                     </div>
-                                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white truncate">
                                         Settings
                                     </h2>
                                 </div>
                                 <button
                                     onClick={onClose}
-                                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors"
+                                    className="p-3 sm:p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors touch-manipulation min-w-[44px] min-h-[44px] sm:min-w-auto sm:min-h-auto flex items-center justify-center flex-shrink-0"
+                                    aria-label="Close settings"
                                 >
                                     <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
                                 </button>
@@ -76,10 +77,10 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                         </div>
 
                         {/* Content */}
-                        <div className="p-6 space-y-6">
+                        <div className="p-4 sm:p-6 space-y-6">
                             {/* Output Path */}
                             <div>
-                                <label className="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                <label className="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
                                     <Folder className="w-4 h-4" />
                                     <span>Output Directory</span>
                                 </label>
@@ -87,7 +88,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                                     type="text"
                                     value={localSettings.outputPath}
                                     onChange={(e) => setLocalSettings(prev => ({ ...prev, outputPath: e.target.value }))}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-white"
+                                    className="w-full px-4 py-3 text-base sm:text-sm border border-gray-300 dark:border-dark-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-white min-h-[44px] touch-manipulation"
                                     placeholder="./downloads"
                                 />
                             </div>
@@ -107,7 +108,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                                         <select
                                             value={localSettings.audioFormat}
                                             onChange={(e) => setLocalSettings(prev => ({ ...prev, audioFormat: e.target.value as any }))}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-white"
+                                            className="w-full px-4 py-3 text-base sm:text-sm border border-gray-300 dark:border-dark-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-white min-h-[44px] touch-manipulation"
                                         >
                                             <option value="mp3">MP3</option>
                                             <option value="aac">AAC</option>
@@ -124,7 +125,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                                         <select
                                             value={localSettings.audioQuality}
                                             onChange={(e) => setLocalSettings(prev => ({ ...prev, audioQuality: e.target.value as any }))}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-white"
+                                            className="w-full px-4 py-3 text-base sm:text-sm border border-gray-300 dark:border-dark-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-white min-h-[44px] touch-manipulation"
                                         >
                                             <option value="best">Best Quality</option>
                                             <option value="320">320 kbps</option>
@@ -152,7 +153,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                                         <select
                                             value={localSettings.videoFormat}
                                             onChange={(e) => setLocalSettings(prev => ({ ...prev, videoFormat: e.target.value as any }))}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-white"
+                                            className="w-full px-4 py-3 text-base sm:text-sm border border-gray-300 dark:border-dark-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-white min-h-[44px] touch-manipulation"
                                         >
                                             <option value="mp4">MP4</option>
                                             <option value="webm">WebM</option>
@@ -168,7 +169,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                                         <select
                                             value={localSettings.videoQuality}
                                             onChange={(e) => setLocalSettings(prev => ({ ...prev, videoQuality: e.target.value as any }))}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-white"
+                                            className="w-full px-4 py-3 text-base sm:text-sm border border-gray-300 dark:border-dark-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-white min-h-[44px] touch-manipulation"
                                         >
                                             <option value="best">Best Quality</option>
                                             <option value="1080">1080p</option>
@@ -199,31 +200,31 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                                             max="10"
                                             value={localSettings.maxConcurrentDownloads}
                                             onChange={(e) => setLocalSettings(prev => ({ ...prev, maxConcurrentDownloads: parseInt(e.target.value) }))}
-                                            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-white"
+                                            className="w-full px-4 py-3 text-base sm:text-sm border border-gray-300 dark:border-dark-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-white min-h-[44px] touch-manipulation"
                                         />
                                     </div>
 
                                     <div className="space-y-3">
-                                        <label className="flex items-center space-x-3">
+                                        <label className="flex items-center space-x-3 p-3 rounded-lg border border-gray-200 dark:border-dark-600 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors cursor-pointer touch-manipulation">
                                             <input
                                                 type="checkbox"
                                                 checked={localSettings.subtitles}
                                                 onChange={(e) => setLocalSettings(prev => ({ ...prev, subtitles: e.target.checked }))}
-                                                className="w-4 h-4 text-primary-500 rounded focus:ring-primary-500"
+                                                className="w-5 h-5 text-primary-500 rounded focus:ring-primary-500 focus:ring-2"
                                             />
-                                            <span className="text-sm text-gray-700 dark:text-gray-300">
+                                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">
                                                 Download subtitles by default
                                             </span>
                                         </label>
 
-                                        <label className="flex items-center space-x-3">
+                                        <label className="flex items-center space-x-3 p-3 rounded-lg border border-gray-200 dark:border-dark-600 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors cursor-pointer touch-manipulation">
                                             <input
                                                 type="checkbox"
                                                 checked={localSettings.thumbnails}
                                                 onChange={(e) => setLocalSettings(prev => ({ ...prev, thumbnails: e.target.checked }))}
-                                                className="w-4 h-4 text-primary-500 rounded focus:ring-primary-500"
+                                                className="w-5 h-5 text-primary-500 rounded focus:ring-primary-500 focus:ring-2"
                                             />
-                                            <span className="text-sm text-gray-700 dark:text-gray-300">
+                                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">
                                                 Download thumbnails by default
                                             </span>
                                         </label>

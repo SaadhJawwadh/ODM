@@ -1,5 +1,6 @@
 import './globals.css'
 import { Inter } from 'next/font/google'
+import NotificationContainer from '@/components/NotificationContainer'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -19,6 +20,7 @@ export default function RootLayout({
                 <div className="min-h-screen gradient-bg">
                     {children}
                 </div>
+                <NotificationContainer />
             </body>
         </html>
     )

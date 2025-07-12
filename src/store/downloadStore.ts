@@ -2,11 +2,19 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { DownloadItem, AppSettings, VideoInfo } from '@/types'
 
+interface Notification {
+    id: string
+    message: string
+    type: 'success' | 'error' | 'info'
+    timestamp: number
+}
+
 interface DownloadStore {
     downloads: DownloadItem[]
     settings: AppSettings
     currentVideo: VideoInfo | null
     isLoading: boolean
+    notifications: Notification[]
 
     // Actions
     addDownload: (download: DownloadItem) => void
@@ -21,6 +29,8 @@ interface DownloadStore {
     cancelDownload: (id: string) => void
     deleteDownload: (id: string) => void
     startBrowserDownload: (id: string) => void
+    showNotification: (message: string, type: 'success' | 'error' | 'info') => void
+    removeNotification: (id: string) => void
 }
 
 const defaultSettings: AppSettings = {
@@ -45,6 +55,7 @@ export const useDownloadStore = create<DownloadStore>()(
             settings: defaultSettings,
             currentVideo: null,
             isLoading: false,
+            notifications: [],
 
             addDownload: (download) =>
                 set((state) => ({
@@ -96,29 +107,61 @@ export const useDownloadStore = create<DownloadStore>()(
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ id, action: 'pause' })
                     })
+
+                    set((state) => ({
+                        downloads: state.downloads.map((download) =>
+                            download.id === id ? { ...download, status: 'paused' as const } : download
+                        ),
+                    }))
+
+                    get().showNotification('Download paused', 'info')
                 } catch (error) {
                     console.error('Failed to pause download:', error)
+                    get().showNotification('Failed to pause download', 'error')
                 }
-
-                set((state) => ({
-                    downloads: state.downloads.map((download) =>
-                        download.id === id ? { ...download, status: 'paused' as const } : download
-                    ),
-                }))
             },
 
             resumeDownload: async (id) => {
                 try {
-                    await fetch('/api/download/control', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id, action: 'resume' })
+                    const download = get().downloads.find(d => d.id === id)
+                    if (!download) {
+                        get().showNotification('Download not found', 'error')
+                        return
+                    }
+
+                    // Update status to pending and reset progress
+                    get().updateDownload(id, {
+                        status: 'pending',
+                        progress: 0,
+                        error: ''
                     })
 
-                    // Restart the browser download
-                    get().startBrowserDownload(id)
+                    // Restart the download process by calling the start API
+                    const response = await fetch('/api/download/start', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            id: id,
+                            url: download.url,
+                            format: download.format,
+                            quality: download.quality,
+                            audioOnly: download.audioOnly || false,
+                            subtitles: download.subtitles || false,
+                            thumbnails: download.thumbnails || false
+                        })
+                    })
+
+                    if (!response.ok) {
+                        throw new Error('Failed to restart download')
+                    }
+
+                    get().showNotification('Download resumed', 'info')
                 } catch (error) {
                     console.error('Failed to resume download:', error)
+                    get().showNotification('Failed to resume download', 'error')
+
+                    // Reset status to paused on error
+                    get().updateDownload(id, { status: 'paused' })
                 }
             },
 
@@ -135,13 +178,16 @@ export const useDownloadStore = create<DownloadStore>()(
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ id, action: 'cancel' })
                     })
+
+                    set((state) => ({
+                        downloads: state.downloads.filter((download) => download.id !== id),
+                    }))
+
+                    get().showNotification('Download cancelled', 'info')
                 } catch (error) {
                     console.error('Failed to cancel download:', error)
+                    get().showNotification('Failed to cancel download', 'error')
                 }
-
-                set((state) => ({
-                    downloads: state.downloads.filter((download) => download.id !== id),
-                }))
             },
 
             deleteDownload: async (id) => {
@@ -157,20 +203,29 @@ export const useDownloadStore = create<DownloadStore>()(
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ id, action: 'delete' })
                     })
+
+                    set((state) => ({
+                        downloads: state.downloads.filter((download) => download.id !== id),
+                    }))
+
+                    get().showNotification('Download deleted', 'info')
                 } catch (error) {
                     console.error('Failed to delete download:', error)
+                    get().showNotification('Failed to delete download', 'error')
                 }
-
-                set((state) => ({
-                    downloads: state.downloads.filter((download) => download.id !== id),
-                }))
             },
 
             startBrowserDownload: async (id) => {
                 const download = get().downloads.find(d => d.id === id)
-                if (!download) return
+                if (!download) {
+                    get().showNotification('Download not found', 'error')
+                    return
+                }
 
-                if (download.status !== 'ready') return
+                if (download.status !== 'ready') {
+                    get().showNotification('Download not ready', 'error')
+                    return
+                }
 
                 try {
                     // Update status to downloading
@@ -180,7 +235,14 @@ export const useDownloadStore = create<DownloadStore>()(
                     const response = await fetch(`/api/download/start?id=${id}&action=stream`)
 
                     if (!response.ok) {
-                        throw new Error(`Failed to download: ${response.statusText}`)
+                        // Check if response is JSON (error response)
+                        const contentType = response.headers.get('content-type')
+                        if (contentType && contentType.includes('application/json')) {
+                            const errorData = await response.json()
+                            throw new Error(errorData.error || `Failed to download: ${response.statusText}`)
+                        } else {
+                            throw new Error(`Failed to download: ${response.statusText}`)
+                        }
                     }
 
                     // Get filename from response headers
@@ -207,15 +269,41 @@ export const useDownloadStore = create<DownloadStore>()(
 
                     // Mark as completed
                     get().updateDownload(id, { status: 'completed', progress: 100 })
+                    get().showNotification('Download completed successfully', 'success')
 
                 } catch (error) {
                     console.error('Download error:', error)
+                    const errorMessage = error instanceof Error ? error.message : 'Download failed'
                     get().updateDownload(id, {
                         status: 'error',
-                        error: error instanceof Error ? error.message : 'Download failed'
+                        error: errorMessage
                     })
+                    get().showNotification(`Download failed: ${errorMessage}`, 'error')
                 }
-            }
+            },
+
+            showNotification: (message, type) => {
+                const id = Date.now().toString()
+                const notification: Notification = {
+                    id,
+                    message,
+                    type,
+                    timestamp: Date.now()
+                }
+                set((state) => ({
+                    notifications: [...state.notifications, notification]
+                }))
+
+                // Auto-remove notification after 3 seconds
+                setTimeout(() => {
+                    get().removeNotification(id)
+                }, 3000)
+            },
+
+            removeNotification: (id) =>
+                set((state) => ({
+                    notifications: state.notifications.filter(n => n.id !== id)
+                }))
         }),
         {
             name: 'download-store',

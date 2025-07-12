@@ -36,4 +36,33 @@
         -webkit-box-orient: vertical;
         -webkit-line-clamp: 2;
     }
+
+    /* Mobile-specific optimizations */
+    .touch-manipulation {
+        touch-action: manipulation;
+    }
+
+    /* Improve tap targets on mobile */
+    @media (max-width: 640px) {
+
+        button,
+        a,
+        input[type="checkbox"],
+        input[type="radio"],
+        select {
+            min-height: 44px;
+        }
+
+        /* Improve scrolling on mobile */
+        * {
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* Prevent zoom on inputs */
+        input,
+        select,
+        textarea {
+            font-size: 16px;
+        }
+    }
 }

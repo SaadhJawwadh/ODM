@@ -16,6 +16,9 @@ export interface DownloadItem {
     error?: string
     createdAt: Date
     completedAt?: Date
+    audioOnly?: boolean
+    subtitles?: boolean
+    thumbnails?: boolean
 }
 
 export interface VideoInfo {
