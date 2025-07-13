@@ -1,0 +1,36 @@
+{
+    "version": 2,
+    "builds": [
+        {
+            "src": "package.json",
+            "use": "@vercel/node",
+            "config": {
+                "includeFiles": [
+                    "bin/**"
+                ]
+            }
+        }
+    ],
+    "routes": [
+        {
+            "src": "/api/(.*)",
+            "dest": "/api/$1"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/$1"
+        }
+    ],
+    "env": {
+        "NODE_ENV": "production"
+    },
+    "functions": {
+        "src/app/api/download/start/route.ts": {
+            "maxDuration": 300
+        },
+        "src/app/api/video/info/route.ts": {
+            "maxDuration": 60
+        }
+    },
+    "installCommand": "npm install && npm run setup:ytdlp"
+}

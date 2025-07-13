@@ -1,0 +1,17 @@
+{
+    "version": 2,
+    "build": {
+        "buildpacks": [
+            "heroku/nodejs",
+            "heroku/python"
+        ]
+    },
+    "deploy": {
+        "startCommand": "npm start",
+        "healthcheckPath": "/api/ytdlp"
+    },
+    "env": {
+        "NODE_ENV": "production",
+        "PYTHON_VERSION": "3.9"
+    }
+}
