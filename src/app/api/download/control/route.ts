@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unlink, existsSync } from 'fs'
+import { promisify } from 'util'
+
+const unlinkAsync = promisify(unlink)
 
 // Import the shared activeDownloads map
 let activeDownloads: Map<string, any>
@@ -61,7 +65,49 @@ export async function POST(request: NextRequest) {
                 break
 
             case 'delete':
-                // Delete the download record
+                // Kill the process if still running
+                if (download.process && !download.process.killed) {
+                    download.process.kill('SIGTERM')
+                }
+
+                // Abort any active download
+                if (download.abortController) {
+                    download.abortController.abort()
+                }
+
+                // Delete the physical file if it exists
+                if (download.filePath && existsSync(download.filePath)) {
+                    try {
+                        await unlinkAsync(download.filePath)
+                        console.log(`Deleted file: ${download.filePath}`)
+                    } catch (error) {
+                        console.error(`Failed to delete file ${download.filePath}:`, error)
+                    }
+                }
+
+                // Also try to delete common file patterns in temp directory
+                if (download.fileName) {
+                    const tempDir = './temp'
+                    const possibleFiles = [
+                        `${tempDir}/${download.fileName}`,
+                        `${tempDir}/${download.fileName.replace(/\.[^/.]+$/, '')}.mp4`,
+                        `${tempDir}/${download.fileName.replace(/\.[^/.]+$/, '')}.webp`,
+                        `${tempDir}/${download.fileName.replace(/\.[^/.]+$/, '')}.mp3`
+                    ]
+
+                    for (const filePath of possibleFiles) {
+                        if (existsSync(filePath)) {
+                            try {
+                                await unlinkAsync(filePath)
+                                console.log(`Deleted file: ${filePath}`)
+                            } catch (error) {
+                                console.error(`Failed to delete file ${filePath}:`, error)
+                            }
+                        }
+                    }
+                }
+
+                // Remove from active downloads
                 activeDownloads.delete(id)
                 break
 

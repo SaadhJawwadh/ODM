@@ -3,8 +3,11 @@ import { spawn } from 'child_process'
 import { readFile, unlink, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { promisify } from 'util'
-import { broadcast } from '@/lib/websocket'
+import { broadcast, initWebSocketServer } from '@/lib/websocket'
 import { ensureYtDlp } from '@/lib/yt-dlp-downloader'
+
+// Initialize WebSocket server
+initWebSocketServer()
 
 const readFileAsync = promisify(readFile)
 const unlinkAsync = promisify(unlink)
@@ -98,7 +101,7 @@ try {
 
 export async function POST(request: NextRequest) {
     try {
-        const ytDlpPath = await ensureYtDlp();
+        const ytDlpPath = await ensureYtDlp(broadcast);
         const { url, format, quality, audioOnly, subtitles, thumbnails, id } = await request.json()
 
         if (!url || !id) {
@@ -165,6 +168,10 @@ export async function POST(request: NextRequest) {
             abortController: null
         })
 
+        // Immediately broadcast the initial status
+        console.log(`Download started for ${id}`)
+        broadcast({ type: 'progress', id, status: 'downloading', progress: 0, speed: '', eta: '', fileName: '', fileSize: '' })
+
         // Handle progress updates
         downloadProcess.stdout.on('data', (data: Buffer) => {
             const output = data.toString()
@@ -175,19 +182,30 @@ export async function POST(request: NextRequest) {
                 const download = activeDownloads.get(id)
                 if (!download) continue
 
-                // Extract progress information
-                if (line.includes('%')) {
-                    const progressMatch = line.match(/(\d+\.?\d*)%/)
-                    const speedMatch = line.match(/(\d+\.?\d*\w+\/s)/)
-                    const etaMatch = line.match(/ETA (\d+:\d+)/)
+                // Extract progress information - improved regex patterns
+                if (line.includes('[download]') && line.includes('%')) {
+                    // Match patterns like "[download]  54.2% of    9.65MiB at  742.66KiB/s ETA 00:06"
+                    const progressMatch = line.match(/\[download\]\s+(\d+\.?\d*)%/)
+                    const speedMatch = line.match(/at\s+(\d+\.?\d*\w+\/s)/)
+                    const etaMatch = line.match(/ETA\s+(\d+:\d+)/)
                     const sizeMatch = line.match(/of\s+(\d+\.?\d*\w+)/)
 
                     if (progressMatch) {
-                        download.progress = parseFloat(progressMatch[1])
+                        const progressValue = parseFloat(progressMatch[1])
+                        download.progress = progressValue
                         download.speed = speedMatch ? speedMatch[1] : ''
                         download.eta = etaMatch ? etaMatch[1] : ''
                         download.fileSize = sizeMatch ? sizeMatch[1] : ''
-                        broadcast({ type: 'progress', id, ...download })
+
+                        // Update status based on progress
+                        if (progressValue >= 100) {
+                            download.status = 'ready'
+                        } else if (progressValue > 0) {
+                            download.status = 'downloading'
+                        }
+
+                        console.log(`Broadcasting progress: ${progressValue}% for ${id}`)
+                        broadcast({ type: 'progress', id, status: download.status, progress: download.progress, speed: download.speed, eta: download.eta, fileName: download.fileName, fileSize: download.fileSize })
                     }
                 }
 
@@ -197,14 +215,17 @@ export async function POST(request: NextRequest) {
                     if (pathMatch) {
                         download.filePath = pathMatch[1].trim()
                         download.fileName = pathMatch[1].split(/[\\/]/).pop() || ''
+                        console.log(`File path set: ${download.filePath}`)
+                        broadcast({ type: 'progress', id, fileName: download.fileName, filePath: download.filePath })
                     }
                 }
 
-                // Check for completion
-                if (line.includes('100% of') && line.includes('in ')) {
+                // Check for completion - multiple patterns
+                if (line.includes('100% of') || (line.includes('[download] 100.0%') && line.includes('in '))) {
                     download.progress = 100
                     download.status = 'ready'
-                    broadcast({ type: 'progress', id, ...download })
+                    console.log(`Download completed for ${id}`)
+                    broadcast({ type: 'progress', id, status: 'ready', progress: 100, fileName: download.fileName, fileSize: download.fileSize })
                 }
             }
         })

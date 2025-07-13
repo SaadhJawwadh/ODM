@@ -71,11 +71,15 @@ function getYtDlpExecutable(): { path: string; type: 'system' | 'local' } | null
     return null;
 }
 
-export async function ensureYtDlp(): Promise<string> {
+export async function ensureYtDlp(broadcast?: (data: any) => void): Promise<string> {
     const executable = getYtDlpExecutable();
     if (executable) {
         console.log(`Using ${executable.type} yt-dlp at ${executable.path}`);
         return executable.path;
+    }
+
+    if (broadcast) {
+        broadcast({ type: 'system_status', message: 'Downloader not found. Installing now...', status: 'installing' });
     }
 
     console.log('yt-dlp not found, attempting to download...');
@@ -87,6 +91,12 @@ export async function ensureYtDlp(): Promise<string> {
             chmodSync(localPath, 0o755);
         }
         console.log('yt-dlp downloaded and is ready.');
+
+        if (broadcast) {
+            const newStatus = await getYtDlpStatus();
+            broadcast({ type: 'system_status', message: `Downloader installed (v${newStatus.version})`, status: 'ready' });
+        }
+
         return localPath;
     } catch (error) {
         console.error('Failed to download yt-dlp:', error);

@@ -8,48 +8,79 @@ import Header from '@/components/Header'
 import DownloadForm from '@/components/DownloadForm'
 import DownloadItem from '@/components/DownloadItem'
 import Settings from '@/components/Settings'
+import SystemStatus from '@/components/SystemStatus'
+import YtDlpStatusSection from '@/components/YtDlpStatusSection'
 
 export default function Home() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false)
     const [filter, setFilter] = useState<'all' | 'downloading' | 'completed' | 'error'>('all')
-    const { downloads, updateDownload, clearCompleted, startBrowserDownload } = useDownloadStore()
+    const { downloads, updateDownload, clearCompleted, startBrowserDownload, setSystemStatus } = useDownloadStore()
 
     useEffect(() => {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-        const ws = new WebSocket(`${protocol}//${window.location.host}`)
+        let ws: WebSocket
+        let reconnectTimeout: NodeJS.Timeout
 
-        ws.onopen = () => {
-            console.log('WebSocket connection established')
-        }
+        const connectWebSocket = () => {
+            // Determine the correct WebSocket URL based on environment
+            const wsUrl = process.env.NODE_ENV === 'development'
+                ? 'ws://localhost:3002'
+                : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
 
-        ws.onmessage = event => {
-            const data = JSON.parse(event.data)
-            if (data.type === 'progress') {
-                updateDownload(data.id, {
-                    status: data.status,
-                    progress: data.progress || 0,
-                    speed: data.speed || '',
-                    eta: data.eta || '',
-                    error: data.error || '',
-                    fileName: data.fileName || '',
-                    fileSize: data.fileSize || ''
-                })
+            console.log('Connecting to WebSocket:', wsUrl)
+            ws = new WebSocket(wsUrl)
+
+            ws.onopen = () => {
+                console.log('✅ WebSocket connection established')
+            }
+
+            ws.onmessage = event => {
+                try {
+                    const data = JSON.parse(event.data)
+                    console.log('📨 WebSocket message received:', data)
+
+                    if (data.type === 'progress') {
+                        console.log(`🔄 Updating download ${data.id}: ${data.progress}% - ${data.status}`)
+                        updateDownload(data.id, {
+                            status: data.status,
+                            progress: data.progress || 0,
+                            speed: data.speed || '',
+                            eta: data.eta || '',
+                            error: data.error || '',
+                            fileName: data.fileName || '',
+                            fileSize: data.fileSize || ''
+                        })
+                    } else if (data.type === 'system_status') {
+                        console.log('🔧 System status update:', data)
+                        setSystemStatus({
+                            message: data.message,
+                            status: data.status,
+                        });
+                    }
+                } catch (error) {
+                    console.error('❌ Error parsing WebSocket message:', error)
+                }
+            }
+
+            ws.onclose = (event) => {
+                console.log('🔌 WebSocket connection closed:', event.code, event.reason)
+                // Attempt to reconnect after 3 seconds
+                reconnectTimeout = setTimeout(connectWebSocket, 3000)
+            }
+
+            ws.onerror = error => {
+                console.error('❌ WebSocket error:', error)
             }
         }
 
-        ws.onclose = () => {
-            console.log('WebSocket connection closed')
-        }
-
-        ws.onerror = error => {
-            console.error('WebSocket error:', error)
-        }
+        // Initial connection
+        connectWebSocket()
 
         const unsubscribe = useDownloadStore.subscribe(
             (state, prevState) => {
                 state.downloads.forEach(download => {
                     const prevDownload = prevState.downloads.find(d => d.id === download.id)
                     if (prevDownload && prevDownload.status !== 'ready' && download.status === 'ready') {
+                        console.log('🚀 Auto-starting browser download for:', download.id)
                         startBrowserDownload(download.id)
                     }
                 })
@@ -57,10 +88,15 @@ export default function Home() {
         )
 
         return () => {
-            ws.close()
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout)
+            }
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close()
+            }
             unsubscribe()
         }
-    }, [updateDownload, startBrowserDownload])
+    }, [updateDownload, startBrowserDownload, setSystemStatus])
 
     // Filter downloads based on selected filter
     const filteredDownloads = downloads.filter(download => {
@@ -141,6 +177,11 @@ export default function Home() {
                         </div>
                     </div>
 
+                    {/* Downloader Status */}
+                    <div className="mb-6">
+                        <YtDlpStatusSection />
+                    </div>
+
                     {/* Filters */}
                     <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-2">
                         <div className="flex items-center space-x-2">
@@ -201,6 +242,7 @@ export default function Home() {
                 isOpen={isSettingsOpen}
                 onClose={() => setIsSettingsOpen(false)}
             />
+            <SystemStatus />
         </div>
     )
 }

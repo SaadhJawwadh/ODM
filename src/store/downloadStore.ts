@@ -9,12 +9,18 @@ interface Notification {
     timestamp: number
 }
 
+interface SystemStatus {
+    message: string;
+    status: 'installing' | 'ready' | 'idle';
+}
+
 interface DownloadStore {
     downloads: DownloadItem[]
     settings: AppSettings
     currentVideo: VideoInfo | null
     isLoading: boolean
     notifications: Notification[]
+    systemStatus: SystemStatus | null;
 
     // Actions
     addDownload: (download: DownloadItem) => void
@@ -31,6 +37,7 @@ interface DownloadStore {
     startBrowserDownload: (id: string) => void
     showNotification: (message: string, type: 'success' | 'error' | 'info') => void
     removeNotification: (id: string) => void
+    setSystemStatus: (status: SystemStatus | null) => void;
 }
 
 const defaultSettings: AppSettings = {
@@ -56,6 +63,7 @@ export const useDownloadStore = create<DownloadStore>()(
             currentVideo: null,
             isLoading: false,
             notifications: [],
+            systemStatus: null,
 
             addDownload: (download) =>
                 set((state) => ({
@@ -73,6 +81,8 @@ export const useDownloadStore = create<DownloadStore>()(
                 set((state) => ({
                     downloads: state.downloads.filter((download) => download.id !== id),
                 })),
+
+            setSystemStatus: (status) => set({ systemStatus: status }),
 
             clearCompleted: () =>
                 set((state) => ({
