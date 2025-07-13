@@ -14,48 +14,53 @@ export default function Home() {
     const [filter, setFilter] = useState<'all' | 'downloading' | 'completed' | 'error'>('all')
     const { downloads, updateDownload, clearCompleted, startBrowserDownload } = useDownloadStore()
 
-    // Poll for download progress updates
     useEffect(() => {
-        const activeDownloads = downloads.filter(d =>
-            d.status === 'downloading' || d.status === 'pending' || d.status === 'ready'
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        const ws = new WebSocket(`${protocol}//${window.location.host}`)
+
+        ws.onopen = () => {
+            console.log('WebSocket connection established')
+        }
+
+        ws.onmessage = event => {
+            const data = JSON.parse(event.data)
+            if (data.type === 'progress') {
+                updateDownload(data.id, {
+                    status: data.status,
+                    progress: data.progress || 0,
+                    speed: data.speed || '',
+                    eta: data.eta || '',
+                    error: data.error || '',
+                    fileName: data.fileName || '',
+                    fileSize: data.fileSize || ''
+                })
+            }
+        }
+
+        ws.onclose = () => {
+            console.log('WebSocket connection closed')
+        }
+
+        ws.onerror = error => {
+            console.error('WebSocket error:', error)
+        }
+
+        const unsubscribe = useDownloadStore.subscribe(
+            (state, prevState) => {
+                state.downloads.forEach(download => {
+                    const prevDownload = prevState.downloads.find(d => d.id === download.id)
+                    if (prevDownload && prevDownload.status !== 'ready' && download.status === 'ready') {
+                        startBrowserDownload(download.id)
+                    }
+                })
+            }
         )
 
-        if (activeDownloads.length === 0) return
-
-        const interval = setInterval(async () => {
-            for (const download of activeDownloads) {
-                try {
-                    const response = await fetch(`/api/download/start?id=${download.id}`)
-                    if (response.ok) {
-                        const data = await response.json()
-
-                        // Update download status
-                        updateDownload(download.id, {
-                            status: data.status,
-                            progress: data.progress || 0,
-                            speed: data.speed || '',
-                            eta: data.eta || '',
-                            error: data.error || '',
-                            fileName: data.fileName || '',
-                            fileSize: data.fileSize || ''
-                        })
-
-                        // Auto-start ready downloads
-                        if (data.status === 'ready' && download.status !== 'ready') {
-                            // Small delay to ensure UI updates, then start download
-                            setTimeout(() => {
-                                startBrowserDownload(download.id)
-                            }, 1000)
-                        }
-                    }
-                } catch (error) {
-                    console.error('Error fetching download progress:', error)
-                }
-            }
-        }, 2000) // Poll every 2 seconds
-
-        return () => clearInterval(interval)
-    }, [downloads, updateDownload, startBrowserDownload])
+        return () => {
+            ws.close()
+            unsubscribe()
+        }
+    }, [updateDownload, startBrowserDownload])
 
     // Filter downloads based on selected filter
     const filteredDownloads = downloads.filter(download => {

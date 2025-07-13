@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { spawn } from 'child_process'
 import { readFile, unlink, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { promisify } from 'util'
+import { broadcast } from '@/lib/websocket'
+import YTDlpWrap from 'yt-dlp-wrap'
+
+const ytDlpWrap = new YTDlpWrap()
 
 const readFileAsync = promisify(readFile)
 const unlinkAsync = promisify(unlink)
@@ -102,12 +105,17 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'URL and ID are required' }, { status: 400 })
         }
 
+        const videoInfo = await ytDlpWrap.getVideoInfo(url);
+        const title = videoInfo.title || 'video';
+        const outputTemplate = `./temp/${title}.%(ext)s`;
+
         // Build yt-dlp command to download to temp directory
         const args = [
             '--newline',
             '--no-warnings',
             '--progress',
-            '--output', `./temp/%(title)s.%(ext)s`
+            '--progress-template', '"%(progress)j"',
+            '--output', outputTemplate
         ]
 
         if (audioOnly) {
@@ -146,8 +154,8 @@ export async function POST(request: NextRequest) {
 
         console.log('yt-dlp command:', 'yt-dlp', args.join(' '))
 
-        // Start download process
-        const downloadProcess = spawn('yt-dlp', args)
+        // Get the singleton instance of YTDlpWrap
+        const downloadProcess = ytDlpWrap.exec(args)
 
         // Store the process
         activeDownloads.set(id, {
@@ -156,73 +164,56 @@ export async function POST(request: NextRequest) {
             progress: 0,
             speed: '',
             eta: '',
-            fileName: '',
+            fileName: `${title}.${videoInfo.ext || 'mp4'}`,
             fileSize: '',
             filePath: '',
-            abortController: null
+            abortController: downloadProcess.controller
         })
 
-        // Handle progress updates
-        downloadProcess.stdout.on('data', (data: Buffer) => {
-            const output = data.toString()
-            console.log(`Download output for ${id}:`, output)
-            const lines = output.split('\n').filter(line => line.trim())
+        // Handle progress updates using the 'progress' event from yt-dlp-wrap
+        downloadProcess.on('progress', (progress) => {
+            const download = activeDownloads.get(id)
+            if (!download) return
 
-            for (const line of lines) {
-                const download = activeDownloads.get(id)
-                if (!download) continue
+            download.progress = progress.percent;
+            download.speed = progress.currentSpeed;
+            download.eta = progress.eta;
+            download.fileSize = progress.totalSize;
 
-                // Extract progress information
-                if (line.includes('%')) {
-                    const progressMatch = line.match(/(\d+\.?\d*)%/)
-                    const speedMatch = line.match(/(\d+\.?\d*\w+\/s)/)
-                    const etaMatch = line.match(/ETA (\d+:\d+)/)
-                    const sizeMatch = line.match(/of\s+(\d+\.?\d*\w+)/)
+            broadcast({ type: 'progress', id, ...download })
+        });
 
-                    if (progressMatch) {
-                        download.progress = parseFloat(progressMatch[1])
-                        download.speed = speedMatch ? speedMatch[1] : ''
-                        download.eta = etaMatch ? etaMatch[1] : ''
-                        download.fileSize = sizeMatch ? sizeMatch[1] : ''
-                    }
-                }
+        // Handle metadata event to get filename
+        downloadProcess.on('ytDlpEvent', (eventType, eventData) => {
+            if (eventType === 'info') {
+                 const download = activeDownloads.get(id)
+                 if (!download) return
 
-                // Extract destination file path
-                if (line.includes('[download] Destination:')) {
-                    const pathMatch = line.match(/\[download\] Destination: (.+)/)
-                    if (pathMatch) {
-                        download.filePath = pathMatch[1].trim()
-                        download.fileName = pathMatch[1].split(/[\\/]/).pop() || ''
-                    }
-                }
-
-                // Check for completion
-                if (line.includes('100% of') && line.includes('in ')) {
-                    download.progress = 100
-                    download.status = 'ready'
-                }
+                 const data = JSON.parse(eventData);
+                 download.filePath = data._filename || ''; // yt-dlp often uses _filename for the final path
             }
-        })
+        });
 
-        downloadProcess.stderr.on('data', (data: Buffer) => {
-            console.error(`Download error for ${id}:`, data.toString())
+
+        downloadProcess.on('error', (error) => {
+            console.error(`Download error for ${id}:`, error.message)
             const download = activeDownloads.get(id)
             if (download) {
                 download.status = 'error'
-                download.error = data.toString()
+                download.error = error.message
+                broadcast({ type: 'progress', id, ...download })
             }
-        })
+        });
 
-        downloadProcess.on('close', (code: number) => {
+        downloadProcess.on('close', () => {
             const download = activeDownloads.get(id)
             if (download) {
-                if (code === 0) {
+                // If status is not already error, mark as ready
+                if (download.status !== 'error') {
                     download.status = 'ready'
                     download.progress = 100
-                } else {
-                    download.status = 'error'
-                    download.error = `Process exited with code ${code}`
                 }
+                broadcast({ type: 'progress', id, ...download })
             }
         })
 
