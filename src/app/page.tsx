@@ -10,7 +10,6 @@ import DownloadItem from '@/components/DownloadItem'
 import Settings from '@/components/Settings'
 import SystemStatus from '@/components/SystemStatus'
 import YtDlpStatusSection from '@/components/YtDlpStatusSection'
-import SystemYtDlpConfig from '@/components/SystemYtDlpConfig'
 
 export default function Home() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false)
@@ -186,11 +185,6 @@ export default function Home() {
                     {/* Downloader Status */}
                     <div className="mb-6">
                         <YtDlpStatusSection />
-                    </div>
-
-                    {/* System yt-dlp Configuration */}
-                    <div className="mb-6">
-                        <SystemYtDlpConfig />
                     </div>
 
                     {/* Filters */}

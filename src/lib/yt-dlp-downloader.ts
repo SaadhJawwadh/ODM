@@ -1,9 +1,4 @@
 
-import { execSync } from 'child_process';
-import { existsSync, mkdirSync, chmodSync, createWriteStream, unlinkSync } from 'fs';
-import { join } from 'path';
-import { Readable } from 'stream';
-import { finished } from 'stream/promises';
 import {
     getYtdlpPath,
     validateYtdlpInstallation,
@@ -11,89 +6,20 @@ import {
     YtDlpNotFoundError
 } from './ytdlp-manager';
 
-const binDir = join(process.cwd(), 'bin');
-
-function getPlatformInfo() {
-    const platform = process.platform;
-    const arch = process.arch;
-
-    if (platform === 'win32') {
-        return {
-            name: 'yt-dlp.exe',
-            url: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe',
-        };
-    }
-
-    if (platform === 'linux') {
-        return {
-            name: 'yt-dlp',
-            url: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp',
-        };
-    }
-
-    if (platform === 'darwin') {
-        return {
-            name: 'yt-dlp_macos',
-            url: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos',
-        };
-    }
-
-    throw new Error(`Unsupported platform: ${platform}`);
-}
-
-async function downloadFile(url: string, path: string) {
-    console.log(`Downloading ${url} to ${path}`);
-    if (!existsSync(binDir)) {
-        mkdirSync(binDir, { recursive: true });
-    }
-    const response = await fetch(url);
-    if (!response.ok || !response.body) {
-        throw new Error(`Failed to download file: ${response.statusText}`);
-    }
-    const body = response.body as unknown as NodeJS.ReadableStream;
-    const fileStream = createWriteStream(path, { mode: 0o755 });
-    await finished(body.pipe(fileStream));
-    console.log('Download finished.');
-}
-
 /**
- * @deprecated This function is deprecated. Use getYtdlpPath() from ytdlp-manager instead.
- */
-function getYtDlpExecutable(): { path: string; type: 'system' | 'local' } | null {
-    try {
-        execSync('yt-dlp --version', { stdio: 'ignore' });
-        return { path: 'yt-dlp', type: 'system' };
-    } catch (e) {
-        // Not in path, check local
-    }
-
-    const platformInfo = getPlatformInfo();
-    const localPath = join(binDir, platformInfo.name);
-
-    if (existsSync(localPath)) {
-        if (process.platform !== 'win32') {
-            chmodSync(localPath, 0o755); // Ensure it's executable
-        }
-        return { path: localPath, type: 'local' };
-    }
-
-    return null;
-}
-
-/**
- * Ensures yt-dlp is available, using the new secure manager
+ * Ensures yt-dlp is available using yt-dlp-wrap
  */
 export async function ensureYtDlp(broadcast?: (data: any) => void): Promise<string> {
     try {
-        // First try to use the existing installation
+        // Check if yt-dlp is already available
         const systemInfo = await getYtdlpSystemInfo();
         if (systemInfo.available) {
             console.log(`Using ${systemInfo.source} yt-dlp at ${systemInfo.path}`);
             return systemInfo.path!;
         }
     } catch (error) {
-        // If validation fails, continue to download
-        console.log('yt-dlp not found or not working, attempting to download...');
+        // If validation fails, yt-dlp-wrap will handle downloading
+        console.log('yt-dlp not found, yt-dlp-wrap will download it automatically...');
     }
 
     if (broadcast) {
@@ -101,87 +27,58 @@ export async function ensureYtDlp(broadcast?: (data: any) => void): Promise<stri
     }
 
     try {
-        const platformInfo = getPlatformInfo();
-        const localPath = join(binDir, platformInfo.name);
-        await downloadFile(platformInfo.url, localPath);
-        if (process.platform !== 'win32') {
-            chmodSync(localPath, 0o755);
-        }
-        console.log('yt-dlp downloaded and is ready.');
+        // yt-dlp-wrap will automatically download the binary when needed
+        const validation = await validateYtdlpInstallation();
+        console.log('yt-dlp is ready.');
 
-        // Validate the downloaded executable
-        try {
-            await validateYtdlpInstallation(localPath);
-            if (broadcast) {
-                const newStatus = await getYtDlpStatus();
-                broadcast({ type: 'system_status', message: `Downloader installed (v${newStatus.version})`, status: 'ready' });
-            }
-            return localPath;
-        } catch (validationError) {
-            throw new Error(`Downloaded yt-dlp executable is not working: ${validationError}`);
+        if (broadcast) {
+            const newStatus = await getYtDlpStatus();
+            broadcast({ type: 'system_status', message: `Downloader ready (v${newStatus.version})`, status: 'ready' });
         }
+
+        return validation.path;
     } catch (error) {
-        console.error('Failed to download yt-dlp:', error);
-        throw new Error('Could not automatically install yt-dlp. Please install it manually and ensure it is available in your system\'s PATH.');
+        console.error('Failed to setup yt-dlp:', error);
+        throw new Error('Could not setup yt-dlp. Please check your network connection and try again.');
     }
 }
 
 /**
- * Gets yt-dlp status using the new secure manager
+ * Get yt-dlp status
  */
 export async function getYtDlpStatus(): Promise<{ status: 'system' | 'local' | 'not_found', version?: string, path?: string }> {
     try {
         const systemInfo = await getYtdlpSystemInfo();
         if (systemInfo.available) {
-            let status: 'system' | 'local' = 'system';
-            if (systemInfo.source === 'bundled') {
-                status = 'local';
-            } else if (systemInfo.source === 'environment' && systemInfo.path?.includes(process.cwd())) {
-                status = 'local';
-            }
-
             return {
-                status,
+                status: systemInfo.source === 'bundled' ? 'local' : 'system',
                 version: systemInfo.version,
                 path: systemInfo.path
             };
         }
     } catch (error) {
-        console.error('Failed to get yt-dlp status:', error);
+        console.error('Error getting yt-dlp status:', error);
     }
 
     return { status: 'not_found' };
 }
 
 /**
- * Updates yt-dlp by downloading the latest version
+ * Update yt-dlp binary
  */
 export async function updateYtDlp(): Promise<{ status: 'system' | 'local' | 'not_found', version?: string, path?: string }> {
-    console.log('Forcing update of local yt-dlp...');
-    const platformInfo = getPlatformInfo();
-    const localPath = join(binDir, platformInfo.name);
-
-    if (existsSync(localPath)) {
-        unlinkSync(localPath);
-        console.log(`Removed existing local binary at ${localPath}`);
-    }
-
     try {
-        await downloadFile(platformInfo.url, localPath);
-        if (process.platform !== 'win32') {
-            chmodSync(localPath, 0o755);
-        }
-        console.log('yt-dlp downloaded.');
+        // With yt-dlp-wrap, we need to clear the instance and re-download
+        // This is handled by the initializeYtDlp function in ytdlp-manager
+        const validation = await validateYtdlpInstallation();
 
-        // Validate the updated executable
-        try {
-            await validateYtdlpInstallation(localPath);
-            return await getYtDlpStatus();
-        } catch (validationError) {
-            throw new Error(`Updated yt-dlp executable is not working: ${validationError}`);
-        }
+        return {
+            status: 'local',
+            version: validation.version,
+            path: validation.path
+        };
     } catch (error) {
-        console.error('Failed to download yt-dlp for update:', error);
-        throw new Error('Could not update yt-dlp.');
+        console.error('Error updating yt-dlp:', error);
+        throw new Error('Failed to update yt-dlp. Please check your network connection and try again.');
     }
 }

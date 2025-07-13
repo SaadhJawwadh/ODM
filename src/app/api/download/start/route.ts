@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { spawn } from 'child_process'
-import { readFile, unlink, existsSync, mkdirSync } from 'fs'
+import { mkdirSync, existsSync, readFileSync, statSync, readFile, unlink, readdirSync } from 'fs'
 import { join } from 'path'
 import { promisify } from 'util'
 import { broadcast, initWebSocketServer } from '@/lib/websocket'
 import { ensureYtDlp } from '@/lib/yt-dlp-downloader'
+import { downloadVideo } from '@/lib/ytdlp-manager'
 
 // Initialize WebSocket server
 initWebSocketServer()
@@ -101,63 +101,96 @@ try {
 
 export async function POST(request: NextRequest) {
     try {
-        const ytDlpPath = await ensureYtDlp(broadcast);
+        await ensureYtDlp(broadcast);
         const { url, format, quality, audioOnly, subtitles, thumbnails, id } = await request.json()
 
         if (!url || !id) {
             return NextResponse.json({ error: 'URL and ID are required' }, { status: 400 })
         }
 
-        // Build yt-dlp command to download to temp directory
-        const args = [
-            '--newline',
-            '--no-warnings',
-            '--progress',
-            '--output', `./temp/%(title)s.%(ext)s`
-        ]
+        // Build options for yt-dlp-wrap
+        const options = {
+            format: audioOnly ? (format || 'mp3') : undefined,
+            output: `./temp/%(title)s.%(ext)s`,
+            audioOnly,
+            timeout: 300000, // 5 minutes
+            onProgress: (progressData: any) => {
+                const download = activeDownloads.get(id)
+                if (!download) return
 
-        if (audioOnly) {
-            args.push('--extract-audio')
-            args.push('--audio-format', format || 'mp3')
-            if (quality !== 'best' && quality !== 'worst') {
-                args.push('--audio-quality', quality)
-            }
-        } else {
-            // Handle video format selection
-            if (quality === 'best') {
-                args.push('--format', 'best')
-            } else if (quality === 'worst') {
-                args.push('--format', 'worst')
-            } else {
-                // For specific quality numbers like 1080, 720, etc.
-                const qualityNum = parseInt(quality)
-                if (!isNaN(qualityNum)) {
-                    args.push('--format', `best[height<=${qualityNum}]`)
-                } else {
-                    args.push('--format', 'best')
+                // Handle different progress data formats from yt-dlp-wrap
+                let progressValue = 0
+                let speed = ''
+                let eta = ''
+                let fileName = ''
+                let fileSize = ''
+
+                if (progressData.percent) {
+                    progressValue = parseFloat(progressData.percent)
+                }
+
+                if (progressData.currentSpeed) {
+                    speed = progressData.currentSpeed
+                }
+
+                if (progressData.eta) {
+                    eta = progressData.eta
+                }
+
+                if (progressData.totalSize) {
+                    fileSize = progressData.totalSize
+                }
+
+                // Only update if progress has actually changed
+                if (download.progress !== progressValue) {
+                    download.progress = progressValue
+                    download.speed = speed
+                    download.eta = eta
+                    download.fileName = fileName
+                    download.fileSize = fileSize
+
+                    // If we reach 100%, mark as ready but don't finalize yet
+                    if (progressValue >= 100) {
+                        download.status = 'ready'
+                    } else {
+                        download.status = 'downloading'
+                    }
+
+                    console.log(`Progress update for ${id}: ${progressValue}%`)
+                    broadcast({
+                        type: 'progress',
+                        id,
+                        status: download.status,
+                        progress: progressValue,
+                        speed,
+                        eta,
+                        fileName,
+                        fileSize
+                    })
                 }
             }
         }
 
-        if (subtitles) {
-            args.push('--write-subs')
-            args.push('--write-auto-subs')
+        // Handle video format selection
+        if (!audioOnly) {
+            if (quality === 'best') {
+                options.format = 'best'
+            } else if (quality === 'worst') {
+                options.format = 'worst'
+            } else {
+                // For specific quality numbers like 1080, 720, etc.
+                const qualityNum = parseInt(quality)
+                if (!isNaN(qualityNum)) {
+                    options.format = `best[height<=${qualityNum}]`
+                } else {
+                    options.format = 'best'
+                }
+            }
         }
 
-        if (thumbnails) {
-            args.push('--write-thumbnail')
-        }
-
-        args.push(url)
-
-        console.log('yt-dlp command:', ytDlpPath, args.join(' '))
-
-        // Start download process
-        const downloadProcess = spawn(ytDlpPath, args)
-
-        // Store the process
+        // Store the download info
         activeDownloads.set(id, {
-            process: downloadProcess,
+            process: null, // yt-dlp-wrap handles the process internally
             status: 'downloading',
             progress: 0,
             speed: '',
@@ -172,97 +205,76 @@ export async function POST(request: NextRequest) {
         console.log(`Download started for ${id}`)
         broadcast({ type: 'progress', id, status: 'downloading', progress: 0, speed: '', eta: '', fileName: '', fileSize: '' })
 
-        // Handle progress updates
-        downloadProcess.stdout.on('data', (data: Buffer) => {
-            const output = data.toString()
-            console.log(`Download output for ${id}:`, output)
-            const lines = output.split('\n').filter(line => line.trim())
+        // Start download using yt-dlp-wrap
+        try {
+            const result = await downloadVideo(url, options)
 
-            for (const line of lines) {
-                const download = activeDownloads.get(id)
-                if (!download) continue
+            const download = activeDownloads.get(id)
+            if (download) {
+                // Find the actual downloaded file
+                const tempDir = join(process.cwd(), 'temp')
+                let actualFilePath = ''
+                let actualFileName = ''
 
-                // Extract progress information - improved regex patterns
-                if (line.includes('[download]') && line.includes('%')) {
-                    // Match patterns like "[download]  54.2% of    9.65MiB at  742.66KiB/s ETA 00:06"
-                    const progressMatch = line.match(/\[download\]\s+(\d+\.?\d*)%/)
-                    const speedMatch = line.match(/at\s+(\d+\.?\d*\w+\/s)/)
-                    const etaMatch = line.match(/ETA\s+(\d+:\d+)/)
-                    const sizeMatch = line.match(/of\s+(\d+\.?\d*\w+)/)
+                if (existsSync(tempDir)) {
+                    const files = readdirSync(tempDir)
+                    // Find the most recently modified file (the downloaded one)
+                    const sortedFiles = files
+                        .map(file => ({
+                            name: file,
+                            path: join(tempDir, file),
+                            stats: statSync(join(tempDir, file))
+                        }))
+                        .sort((a, b) => b.stats.mtime.getTime() - a.stats.mtime.getTime())
 
-                    if (progressMatch) {
-                        const progressValue = parseFloat(progressMatch[1])
-
-                        // Only update if progress has actually changed
-                        if (download.progress !== progressValue) {
-                            download.progress = progressValue
-                            download.speed = speedMatch ? speedMatch[1] : ''
-                            download.eta = etaMatch ? etaMatch[1] : ''
-                            download.fileSize = sizeMatch ? sizeMatch[1] : ''
-
-                            // Update status based on progress
-                            if (progressValue >= 100) {
-                                download.status = 'ready'
-                            } else if (progressValue > 0) {
-                                download.status = 'downloading'
-                            }
-
-                            console.log(`Broadcasting progress: ${progressValue}% for ${id}`)
-                            broadcast({ type: 'progress', id, status: download.status, progress: download.progress, speed: download.speed, eta: download.eta, fileName: download.fileName, fileSize: download.fileSize })
-                        }
+                    if (sortedFiles.length > 0) {
+                        actualFilePath = sortedFiles[0].path
+                        actualFileName = sortedFiles[0].name
                     }
                 }
 
-                // Extract destination file path
-                if (line.includes('[download] Destination:')) {
-                    const pathMatch = line.match(/\[download\] Destination: (.+)/)
-                    if (pathMatch) {
-                        download.filePath = pathMatch[1].trim()
-                        download.fileName = pathMatch[1].split(/[\\/]/).pop() || ''
-                        console.log(`File path set: ${download.filePath}`)
-                        broadcast({ type: 'progress', id, fileName: download.fileName, filePath: download.filePath })
-                    }
-                }
+                download.status = 'ready' // Use 'ready' instead of 'completed' for frontend compatibility
+                download.progress = 100
+                download.filePath = actualFilePath
+                download.fileName = actualFileName
 
-                // Check for completion - multiple patterns
-                if ((line.includes('100% of') || (line.includes('[download] 100.0%') && line.includes('in '))) && download.status !== 'ready') {
-                    download.progress = 100
-                    download.status = 'ready'
-                    console.log(`Download completed for ${id}`)
-                    broadcast({ type: 'progress', id, status: 'ready', progress: 100, fileName: download.fileName, fileSize: download.fileSize })
-                }
+                console.log(`Download completed for ${id}: ${actualFileName}`)
+                broadcast({
+                    type: 'completed',
+                    id,
+                    status: 'ready',
+                    progress: 100,
+                    speed: '',
+                    eta: '',
+                    fileName: actualFileName,
+                    fileSize: download.fileSize,
+                    filePath: actualFilePath
+                })
             }
-        })
+        } catch (error) {
+            console.error(`Download failed for ${id}:`, error)
 
-        downloadProcess.stderr.on('data', (data: Buffer) => {
-            console.error(`Download error for ${id}:`, data.toString())
             const download = activeDownloads.get(id)
             if (download) {
-                download.status = 'error'
-                download.error = data.toString()
-                broadcast({ type: 'progress', id, ...download })
+                download.status = 'failed'
+                broadcast({
+                    type: 'error',
+                    id,
+                    status: 'failed',
+                    progress: download.progress,
+                    speed: '',
+                    eta: '',
+                    fileName: download.fileName,
+                    fileSize: download.fileSize,
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                })
             }
-        })
+        }
 
-        downloadProcess.on('close', (code: number) => {
-            const download = activeDownloads.get(id)
-            if (download) {
-                if (code === 0) {
-                    download.status = 'ready'
-                    download.progress = 100
-                } else {
-                    download.status = 'error'
-                    download.error = `Process exited with code ${code}`
-                }
-                broadcast({ type: 'progress', id, ...download })
-            }
-        })
-
-        return NextResponse.json({ success: true, id })
+        return NextResponse.json({ status: 'started', id })
     } catch (error) {
-        console.error('Download start error:', error)
-        const errorMessage = error instanceof Error ? error.message : 'Failed to start download';
-        return NextResponse.json({ error: errorMessage }, { status: 500 })
+        console.error('Error starting download:', error)
+        return NextResponse.json({ error: 'Failed to start download' }, { status: 500 })
     }
 }
 
