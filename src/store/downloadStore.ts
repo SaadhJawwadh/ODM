@@ -67,7 +67,7 @@ export const useDownloadStore = create<DownloadStore>()(
 
             addDownload: (download) =>
                 set((state) => ({
-                    downloads: [download, ...state.downloads],
+                    downloads: [{ ...download, autoDownloadStarted: false }, ...state.downloads],
                 })),
 
             updateDownload: (id, updates) =>

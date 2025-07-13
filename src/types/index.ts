@@ -19,6 +19,7 @@ export interface DownloadItem {
     audioOnly?: boolean
     subtitles?: boolean
     thumbnails?: boolean
+    autoDownloadStarted?: boolean
 }
 
 export interface VideoFormat {

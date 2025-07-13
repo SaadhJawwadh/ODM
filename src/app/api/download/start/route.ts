@@ -192,20 +192,24 @@ export async function POST(request: NextRequest) {
 
                     if (progressMatch) {
                         const progressValue = parseFloat(progressMatch[1])
-                        download.progress = progressValue
-                        download.speed = speedMatch ? speedMatch[1] : ''
-                        download.eta = etaMatch ? etaMatch[1] : ''
-                        download.fileSize = sizeMatch ? sizeMatch[1] : ''
 
-                        // Update status based on progress
-                        if (progressValue >= 100) {
-                            download.status = 'ready'
-                        } else if (progressValue > 0) {
-                            download.status = 'downloading'
+                        // Only update if progress has actually changed
+                        if (download.progress !== progressValue) {
+                            download.progress = progressValue
+                            download.speed = speedMatch ? speedMatch[1] : ''
+                            download.eta = etaMatch ? etaMatch[1] : ''
+                            download.fileSize = sizeMatch ? sizeMatch[1] : ''
+
+                            // Update status based on progress
+                            if (progressValue >= 100) {
+                                download.status = 'ready'
+                            } else if (progressValue > 0) {
+                                download.status = 'downloading'
+                            }
+
+                            console.log(`Broadcasting progress: ${progressValue}% for ${id}`)
+                            broadcast({ type: 'progress', id, status: download.status, progress: download.progress, speed: download.speed, eta: download.eta, fileName: download.fileName, fileSize: download.fileSize })
                         }
-
-                        console.log(`Broadcasting progress: ${progressValue}% for ${id}`)
-                        broadcast({ type: 'progress', id, status: download.status, progress: download.progress, speed: download.speed, eta: download.eta, fileName: download.fileName, fileSize: download.fileSize })
                     }
                 }
 
@@ -221,7 +225,7 @@ export async function POST(request: NextRequest) {
                 }
 
                 // Check for completion - multiple patterns
-                if (line.includes('100% of') || (line.includes('[download] 100.0%') && line.includes('in '))) {
+                if ((line.includes('100% of') || (line.includes('[download] 100.0%') && line.includes('in '))) && download.status !== 'ready') {
                     download.progress = 100
                     download.status = 'ready'
                     console.log(`Download completed for ${id}`)

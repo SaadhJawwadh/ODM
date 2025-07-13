@@ -79,8 +79,13 @@ export default function Home() {
             (state, prevState) => {
                 state.downloads.forEach(download => {
                     const prevDownload = prevState.downloads.find(d => d.id === download.id)
-                    if (prevDownload && prevDownload.status !== 'ready' && download.status === 'ready') {
+                    if (prevDownload &&
+                        prevDownload.status !== 'ready' &&
+                        download.status === 'ready' &&
+                        !download.autoDownloadStarted) {
                         console.log('🚀 Auto-starting browser download for:', download.id)
+                        // Mark as started to prevent multiple downloads
+                        updateDownload(download.id, { autoDownloadStarted: true })
                         startBrowserDownload(download.id)
                     }
                 })
