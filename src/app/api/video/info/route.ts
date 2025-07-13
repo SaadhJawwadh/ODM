@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { exec } from 'child_process'
-import { promisify } from 'util'
-
-const execAsync = promisify(exec)
+import { getVideoInfo, YtDlpNotFoundError, YtDlpExecutionError } from '@/lib/ytdlp-manager'
 
 // Helper function to format file sizes
 function formatFileSize(bytes: number): string {
@@ -81,17 +78,17 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'URL is required' }, { status: 400 })
         }
 
-        // Get video info using yt-dlp with additional format details
-        const command = `yt-dlp --dump-json --no-warnings "${url}"`
-
-        const { stdout, stderr } = await execAsync(command)
-
-        if (stderr) {
-            console.error('yt-dlp error:', stderr)
-            return NextResponse.json({ error: 'Failed to get video info' }, { status: 500 })
+        // Validate URL format (basic validation)
+        if (typeof url !== 'string' || url.trim().length === 0) {
+            return NextResponse.json({ error: 'Invalid URL format' }, { status: 400 })
         }
 
-        const videoInfo = JSON.parse(stdout)
+        // Security: Use the secure yt-dlp manager instead of exec
+        // This prevents command injection by passing arguments separately
+        const videoInfo = await getVideoInfo(url.trim(), {
+            timeout: 30000, // 30 second timeout
+            maxBuffer: 1024 * 1024 * 5 // 5MB max buffer for JSON
+        })
 
         // Categorize formats
         const categorizedFormats = categorizeFormats(videoInfo.formats || [])
@@ -153,6 +150,42 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(response)
     } catch (error) {
         console.error('Error getting video info:', error)
-        return NextResponse.json({ error: 'Failed to get video info' }, { status: 500 })
+
+        // Handle specific yt-dlp errors with appropriate HTTP status codes
+        if (error instanceof YtDlpNotFoundError) {
+            return NextResponse.json({
+                error: 'yt-dlp not found or not properly configured',
+                details: error.message
+            }, { status: 503 }) // Service Unavailable
+        }
+
+        if (error instanceof YtDlpExecutionError) {
+            // Check if it's a URL-related error
+            if (error.stderr.includes('Unsupported URL') || error.stderr.includes('No video found')) {
+                return NextResponse.json({
+                    error: 'Invalid or unsupported URL',
+                    details: error.stderr
+                }, { status: 400 }) // Bad Request
+            }
+
+            // Check if it's a network/access error
+            if (error.stderr.includes('HTTP Error') || error.stderr.includes('Unable to download')) {
+                return NextResponse.json({
+                    error: 'Unable to access video',
+                    details: 'The video may be private, deleted, or temporarily unavailable'
+                }, { status: 422 }) // Unprocessable Entity
+            }
+
+            return NextResponse.json({
+                error: 'Failed to get video info',
+                details: error.message
+            }, { status: 500 }) // Internal Server Error
+        }
+
+        // Handle other errors
+        return NextResponse.json({
+            error: 'Failed to get video info',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        }, { status: 500 })
     }
 }

@@ -4,14 +4,9 @@
     "private": true,
     "scripts": {
         "dev": "next dev",
-        "build": "npm run setup:ytdlp && next build",
+        "build": "next build",
         "start": "node server.js",
-        "lint": "next lint",
-        "setup:ytdlp": "node scripts/setup-ytdlp.js",
-        "prebuild": "npm run setup:ytdlp",
-        "docker:build": "docker build -t ytdlp-downloader .",
-        "docker:run": "docker run -p 3000:3000 ytdlp-downloader",
-        "docker:compose": "docker-compose up --build"
+        "lint": "next lint"
     },
     "dependencies": {
         "@types/node": "^20.9.0",
@@ -36,8 +31,5 @@
         "@tailwindcss/typography": "^0.5.10",
         "eslint": "^8.53.0",
         "eslint-config-next": "14.0.3"
-    },
-    "engines": {
-        "node": ">=18.0.0"
     }
 }
