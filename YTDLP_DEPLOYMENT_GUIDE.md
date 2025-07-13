@@ -1,28 +1,33 @@
-# Secure yt-dlp Integration Deployment Guide
+# Multi-Engine Download Manager Deployment Guide
 
-This guide provides complete instructions for deploying your web application with secure yt-dlp integration, including both bundled executable and environment variable strategies.
+This guide provides complete instructions for deploying your web application with secure multi-engine download manager integration, including yt-dlp, WebSocket server, Instagram API, and multiple download engines.
 
 ## Overview
 
-The yt-dlp integration provides two main deployment strategies:
+The multi-engine download manager provides several deployment strategies:
 
-1. **Strategy 1: Bundled Executable** - Package yt-dlp directly with your application
-2. **Strategy 2: Environment Variable** - Allow administrators to specify yt-dlp location
+1. **Strategy 1: Bundled Executables** - Package all download engines with your application
+2. **Strategy 2: Environment Configuration** - Allow administrators to specify engine locations
+3. **Strategy 3: Hybrid Approach** - Combine bundled and external engines
+4. **Strategy 4: Container Deployment** - Docker-based deployment with all engines
 
 The system automatically falls back through these strategies in order:
-1. Check `YTDLP_PATH` environment variable
-2. Look for bundled executable in `./bin/` directory
-3. Fall back to system PATH
+1. Check engine-specific environment variables (`YTDLP_PATH`, `YOUTUBE_DL_PATH`, etc.)
+2. Look for bundled executables in `./bin/` directory
+3. Check system PATH for engines
+4. Use built-in JavaScript engines as fallback
 
 ## Security Features
 
-### Command Injection Prevention
+### Multi-Engine Command Injection Prevention
 
-The integration prevents command injection by:
-- Using `spawn()` instead of `exec()` or `shell()` commands
+The integration prevents command injection across all engines by:
+- Using `spawn()` instead of `exec()` or `shell()` commands for external engines
 - Passing user input as separate arguments, not concatenated strings
 - Validating executable paths before execution
-- Setting timeouts and buffer limits
+- Setting timeouts and buffer limits per engine
+- Engine-specific argument sanitization
+- WebSocket message validation and sanitization
 
 ### Example of Secure Usage
 
@@ -38,16 +43,16 @@ spawn(ytdlpPath, args); // User input isolated as argument
 
 ## Deployment Strategies
 
-### Strategy 1: Bundled Executable (Recommended)
+### Strategy 1: Bundled Executables (Recommended)
 
-This is the most reliable approach for production deployments.
+This is the most reliable approach for production deployments, supporting all external engines.
 
 #### For GitHub Actions / CI/CD
 
 Add to your workflow (`.github/workflows/deploy.yml`):
 
 ```yaml
-name: Deploy
+name: Deploy Multi-Engine Application
 
 on:
   push:
@@ -67,12 +72,28 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    - name: Download yt-dlp
+    - name: Download All Engines
       run: |
         mkdir -p bin
+
+        # Download yt-dlp (primary engine)
         wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O bin/yt-dlp
         chmod +x bin/yt-dlp
-        ./bin/yt-dlp --version  # Verify installation
+
+        # Download youtube-dl (fallback)
+        wget https://github.com/ytdl-org/youtube-dl/releases/latest/download/youtube-dl -O bin/youtube-dl
+        chmod +x bin/youtube-dl
+
+        # Verify installations
+        ./bin/yt-dlp --version
+        ./bin/youtube-dl --version
+
+    - name: Setup Instagram API
+      env:
+        INSTAGRAM_USERNAME: ${{ secrets.INSTAGRAM_USERNAME }}
+        INSTAGRAM_PASSWORD: ${{ secrets.INSTAGRAM_PASSWORD }}
+      run: |
+        echo "Instagram credentials configured"
 
     - name: Build application
       run: npm run build
@@ -80,7 +101,8 @@ jobs:
     - name: Deploy to production
       run: |
         # Your deployment commands here
-        # Make sure to include the bin/ directory in your deployment
+        # Make sure to include the bin/ directory and environment variables
+        rsync -av --include='bin/' --exclude='node_modules/' . user@server:/path/to/app/
 ```
 
 #### For Docker Deployment
@@ -90,18 +112,28 @@ FROM node:18-alpine
 
 WORKDIR /app
 
+# Install system dependencies
+RUN apk add --no-cache wget python3 py3-pip ffmpeg
+
 # Copy package files
 COPY package*.json ./
 
 # Install dependencies
 RUN npm ci --only=production
 
-# Download yt-dlp
-RUN apk add --no-cache wget && \
-    mkdir -p bin && \
+# Download all engines
+RUN mkdir -p bin && \
+    # Download yt-dlp (primary)
     wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O bin/yt-dlp && \
     chmod +x bin/yt-dlp && \
-    ./bin/yt-dlp --version
+    # Download youtube-dl (fallback)
+    wget https://github.com/ytdl-org/youtube-dl/releases/latest/download/youtube-dl -O bin/youtube-dl && \
+    chmod +x bin/youtube-dl && \
+    # Install python packages for Instagram API
+    pip3 install --no-cache-dir instaloader && \
+    # Verify installations
+    ./bin/yt-dlp --version && \
+    ./bin/youtube-dl --version
 
 # Copy application code
 COPY . .
@@ -109,7 +141,18 @@ COPY . .
 # Build application
 RUN npm run build
 
-EXPOSE 3000
+# Create downloads directory
+RUN mkdir -p downloads && chown -R node:node downloads
+
+# Switch to non-root user
+USER node
+
+# Expose ports for HTTP and WebSocket
+EXPOSE 3000 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3000/api/ytdlp || exit 1
 
 CMD ["npm", "start"]
 ```
@@ -119,11 +162,32 @@ CMD ["npm", "start"]
 ```bash
 # On your server
 mkdir -p bin
+
+# Download all engines
 wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O bin/yt-dlp
 chmod +x bin/yt-dlp
 
-# Verify installation
+wget https://github.com/ytdl-org/youtube-dl/releases/latest/download/youtube-dl -O bin/youtube-dl
+chmod +x bin/youtube-dl
+
+# Install system dependencies
+sudo apt-get update
+sudo apt-get install -y python3 python3-pip ffmpeg
+
+# Install Instagram API dependencies
+pip3 install instaloader
+
+# Verify installations
 ./bin/yt-dlp --version
+./bin/youtube-dl --version
+
+# Setup environment variables
+export YTDLP_PATH=./bin/yt-dlp
+export YOUTUBE_DL_PATH=./bin/youtube-dl
+export INSTAGRAM_USERNAME=your_username
+export INSTAGRAM_PASSWORD=your_password
+export WEBSOCKET_PORT=3001
+export ENABLE_WEBSOCKET=true
 
 # Start your application
 npm start
@@ -131,34 +195,92 @@ npm start
 
 ### Strategy 2: Environment Variable Configuration
 
-This approach allows administrators to specify yt-dlp location.
+This approach allows administrators to specify all engine locations and configure advanced features.
 
-#### Setting the Environment Variable
+#### Setting Engine Environment Variables
 
 ```bash
-# Point to system installation
+# Primary engines
 export YTDLP_PATH=/usr/local/bin/yt-dlp
+export YOUTUBE_DL_PATH=/usr/local/bin/youtube-dl
 
-# Point to custom location
-export YTDLP_PATH=/opt/yt-dlp/yt-dlp
+# Engine preferences
+export PRIMARY_ENGINE=yt-dlp
+export ENABLE_FALLBACK=true
+
+# Instagram API configuration
+export INSTAGRAM_USERNAME=your_username
+export INSTAGRAM_PASSWORD=your_password
+export INSTAGRAM_API_ENABLED=true
+
+# WebSocket configuration
+export WEBSOCKET_PORT=3001
+export ENABLE_WEBSOCKET=true
+export WEBSOCKET_CORS_ORIGIN=https://yourdomain.com
+
+# Performance settings
+export MAX_CONCURRENT_DOWNLOADS=5
+export MAX_CONCURRENT_YTDLP=3
+export MAX_CONCURRENT_YOUTUBE=2
+export MAX_CONCURRENT_INSTAGRAM=1
+
+# Security settings
+export DOWNLOAD_TIMEOUT=300000
+export MAX_DOWNLOAD_SIZE=5368709120  # 5GB
+export ENABLE_RATE_LIMITING=true
 
 # For systemd service
-echo 'YTDLP_PATH=/usr/local/bin/yt-dlp' >> /etc/environment
+cat > /etc/systemd/system/odm.service << EOF
+[Unit]
+Description=ODM Download Manager
+After=network.target
+
+[Service]
+Type=simple
+User=odm
+WorkingDirectory=/opt/odm
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=10
+
+# Environment variables
+Environment=NODE_ENV=production
+Environment=YTDLP_PATH=/usr/local/bin/yt-dlp
+Environment=YOUTUBE_DL_PATH=/usr/local/bin/youtube-dl
+Environment=PRIMARY_ENGINE=yt-dlp
+Environment=ENABLE_FALLBACK=true
+Environment=WEBSOCKET_PORT=3001
+Environment=ENABLE_WEBSOCKET=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl enable odm
+systemctl start odm
 ```
 
-#### Docker with Environment Variable
+#### Docker with Environment Variables
 
 ```dockerfile
 FROM node:18-alpine
 
 WORKDIR /app
 
-# Install yt-dlp system-wide
-RUN apk add --no-cache python3 py3-pip
-RUN pip3 install yt-dlp
+# Install system dependencies
+RUN apk add --no-cache python3 py3-pip ffmpeg curl
 
-# Set environment variable
+# Install all engines system-wide
+RUN pip3 install yt-dlp youtube-dl instaloader
+
+# Set environment variables for all engines
 ENV YTDLP_PATH=/usr/local/bin/yt-dlp
+ENV YOUTUBE_DL_PATH=/usr/local/bin/youtube-dl
+ENV PRIMARY_ENGINE=yt-dlp
+ENV ENABLE_FALLBACK=true
+ENV WEBSOCKET_PORT=3001
+ENV ENABLE_WEBSOCKET=true
+ENV MAX_CONCURRENT_DOWNLOADS=5
 
 # Copy and build application
 COPY package*.json ./
@@ -166,7 +288,22 @@ RUN npm ci --only=production
 COPY . .
 RUN npm run build
 
-EXPOSE 3000
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S odm -u 1001
+
+# Create downloads directory
+RUN mkdir -p downloads && chown -R odm:nodejs downloads
+
+USER odm
+
+# Expose ports for HTTP and WebSocket
+EXPOSE 3000 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3000/api/ytdlp || exit 1
+
 CMD ["npm", "start"]
 ```
 
@@ -179,11 +316,509 @@ services:
     build: .
     ports:
       - "3000:3000"
+      - "3001:3001"  # WebSocket port
     environment:
+      # Engine configuration
       - YTDLP_PATH=/usr/local/bin/yt-dlp
+      - YOUTUBE_DL_PATH=/usr/local/bin/youtube-dl
+      - PRIMARY_ENGINE=yt-dlp
+      - ENABLE_FALLBACK=true
+
+      # WebSocket configuration
+      - WEBSOCKET_PORT=3001
+      - ENABLE_WEBSOCKET=true
+      - WEBSOCKET_CORS_ORIGIN=https://yourdomain.com
+
+      # Instagram API (use Docker secrets for production)
+      - INSTAGRAM_USERNAME=${INSTAGRAM_USERNAME}
+      - INSTAGRAM_PASSWORD=${INSTAGRAM_PASSWORD}
+      - INSTAGRAM_API_ENABLED=true
+
+      # Performance settings
+      - MAX_CONCURRENT_DOWNLOADS=5
+      - MAX_CONCURRENT_YTDLP=3
+      - MAX_CONCURRENT_YOUTUBE=2
+      - MAX_CONCURRENT_INSTAGRAM=1
+
+      # Security settings
       - NODE_ENV=production
+      - DOWNLOAD_TIMEOUT=300000
+      - MAX_DOWNLOAD_SIZE=5368709120  # 5GB
+      - ENABLE_RATE_LIMITING=true
+
     volumes:
       - ./downloads:/app/downloads
+      - ./logs:/app/logs
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/ytdlp"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Security
+    security_opt:
+      - no-new-privileges:true
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # Optional: Redis for session management and caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+  # Optional: Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+```
+
+### Strategy 3: WebSocket-Enabled Deployment
+
+This strategy focuses on deploying with full WebSocket support for real-time updates.
+
+#### WebSocket Configuration
+
+```typescript
+// server.js - WebSocket server configuration
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import next from 'next';
+
+const dev = process.env.NODE_ENV !== 'production';
+const app = next({ dev });
+const handle = app.getRequestHandler();
+
+const server = createServer();
+const io = new Server(server, {
+    cors: {
+        origin: process.env.WEBSOCKET_CORS_ORIGIN || "http://localhost:3000",
+        methods: ["GET", "POST"]
+    },
+    transports: ['websocket', 'polling']
+});
+
+// WebSocket security middleware
+io.use((socket, next) => {
+    const token = socket.handshake.auth.token;
+    if (validateToken(token)) {
+        next();
+    } else {
+        next(new Error('Authentication error'));
+    }
+});
+
+// WebSocket event handlers
+io.on('connection', (socket) => {
+    console.log('Client connected:', socket.id);
+
+    socket.on('start_download', async (data) => {
+        try {
+            const download = await startDownload(data.url, data.options);
+            socket.emit('download_started', { id: download.id, status: 'started' });
+        } catch (error) {
+            socket.emit('download_error', { error: error.message });
+        }
+    });
+
+    socket.on('pause_download', async (data) => {
+        await pauseDownload(data.id);
+        socket.emit('download_paused', { id: data.id });
+    });
+
+    socket.on('disconnect', () => {
+        console.log('Client disconnected:', socket.id);
+    });
+});
+
+server.listen(3001, () => {
+    console.log('WebSocket server running on port 3001');
+});
+```
+
+#### Nginx Configuration for WebSocket
+
+```nginx
+# nginx.conf
+upstream app {
+    server app:3000;
+}
+
+upstream websocket {
+    server app:3001;
+}
+
+server {
+    listen 80;
+    server_name yourdomain.com;
+
+    # Redirect HTTP to HTTPS
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name yourdomain.com;
+
+    ssl_certificate /etc/nginx/ssl/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl/key.pem;
+
+    # HTTP traffic
+    location / {
+        proxy_pass http://app;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # WebSocket traffic
+    location /socket.io/ {
+        proxy_pass http://websocket;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket specific timeouts
+        proxy_connect_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_read_timeout 7d;
+    }
+}
+```
+
+### Strategy 4: Instagram API Secure Deployment
+
+This strategy focuses on secure deployment with Instagram API integration.
+
+#### Instagram API Security Setup
+
+```bash
+# Create secure credential store
+sudo mkdir -p /etc/odm/secrets
+sudo chmod 700 /etc/odm/secrets
+
+# Store Instagram credentials securely
+echo "your_instagram_username" | sudo tee /etc/odm/secrets/instagram_username
+echo "your_instagram_password" | sudo tee /etc/odm/secrets/instagram_password
+sudo chmod 600 /etc/odm/secrets/*
+
+# Create Instagram API service
+cat > /etc/systemd/system/odm-instagram.service << EOF
+[Unit]
+Description=ODM Instagram API Service
+After=network.target
+
+[Service]
+Type=simple
+User=odm
+WorkingDirectory=/opt/odm
+ExecStart=/usr/bin/node scripts/instagram-service.js
+Restart=always
+RestartSec=10
+
+# Load credentials from secure location
+ExecStartPre=/bin/bash -c 'export INSTAGRAM_USERNAME=\$(cat /etc/odm/secrets/instagram_username)'
+ExecStartPre=/bin/bash -c 'export INSTAGRAM_PASSWORD=\$(cat /etc/odm/secrets/instagram_password)'
+
+Environment=NODE_ENV=production
+Environment=INSTAGRAM_API_ENABLED=true
+Environment=INSTAGRAM_RATE_LIMIT=50
+Environment=INSTAGRAM_SESSION_TIMEOUT=3600000
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable odm-instagram
+sudo systemctl start odm-instagram
+```
+
+#### Instagram API Rate Limiting
+
+```typescript
+// lib/instagram-rate-limiter.ts
+export class InstagramRateLimiter {
+    private requests: Map<string, number[]> = new Map();
+    private readonly maxRequests = 50; // per hour
+    private readonly windowMs = 60 * 60 * 1000; // 1 hour
+
+    async checkRateLimit(clientId: string): Promise<boolean> {
+        const now = Date.now();
+        const windowStart = now - this.windowMs;
+
+        if (!this.requests.has(clientId)) {
+            this.requests.set(clientId, []);
+        }
+
+        const clientRequests = this.requests.get(clientId)!;
+
+        // Remove old requests
+        const validRequests = clientRequests.filter(time => time > windowStart);
+        this.requests.set(clientId, validRequests);
+
+        // Check if limit exceeded
+        if (validRequests.length >= this.maxRequests) {
+            return false;
+        }
+
+        // Add current request
+        validRequests.push(now);
+        return true;
+    }
+}
+```
+
+### Strategy 5: Production Deployment Best Practices
+
+This comprehensive strategy covers all aspects of production deployment.
+
+#### Production Environment Setup
+
+```bash
+# Create production user
+sudo useradd -r -s /bin/bash -d /opt/odm -m odm
+
+# Setup directory structure
+sudo mkdir -p /opt/odm/{bin,downloads,logs,backups,config}
+sudo chown -R odm:odm /opt/odm
+
+# Install production dependencies
+sudo apt-get update
+sudo apt-get install -y nodejs npm python3 python3-pip ffmpeg nginx redis-server
+
+# Install Node.js process manager
+sudo npm install -g pm2
+
+# Setup PM2 ecosystem
+cat > /opt/odm/ecosystem.config.js << EOF
+module.exports = {
+    apps: [
+        {
+            name: 'odm-app',
+            script: './server.js',
+            instances: 'max',
+            exec_mode: 'cluster',
+            env: {
+                NODE_ENV: 'production',
+                PORT: 3000,
+                YTDLP_PATH: '/opt/odm/bin/yt-dlp',
+                YOUTUBE_DL_PATH: '/opt/odm/bin/youtube-dl',
+                PRIMARY_ENGINE: 'yt-dlp',
+                ENABLE_FALLBACK: 'true',
+                MAX_CONCURRENT_DOWNLOADS: 5,
+                WEBSOCKET_PORT: 3001,
+                ENABLE_WEBSOCKET: 'true'
+            },
+            log_file: '/opt/odm/logs/combined.log',
+            out_file: '/opt/odm/logs/out.log',
+            error_file: '/opt/odm/logs/error.log',
+            merge_logs: true,
+            time: true
+        },
+        {
+            name: 'odm-websocket',
+            script: './websocket-server.js',
+            instances: 1,
+            env: {
+                NODE_ENV: 'production',
+                WEBSOCKET_PORT: 3001,
+                REDIS_URL: 'redis://localhost:6379'
+            },
+            log_file: '/opt/odm/logs/websocket.log',
+            time: true
+        }
+    ]
+};
+EOF
+
+sudo chown odm:odm /opt/odm/ecosystem.config.js
+```
+
+#### Production Security Configuration
+
+```bash
+# Setup firewall
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw --force enable
+
+# Setup fail2ban for protection
+sudo apt-get install -y fail2ban
+
+cat > /etc/fail2ban/jail.local << EOF
+[DEFAULT]
+bantime = 3600
+findtime = 600
+maxretry = 5
+
+[sshd]
+enabled = true
+
+[nginx-http-auth]
+enabled = true
+filter = nginx-http-auth
+logpath = /var/log/nginx/error.log
+
+[nginx-limit-req]
+enabled = true
+filter = nginx-limit-req
+logpath = /var/log/nginx/error.log
+maxretry = 10
+
+[nginx-botsearch]
+enabled = true
+filter = nginx-botsearch
+logpath = /var/log/nginx/access.log
+maxretry = 2
+EOF
+
+sudo systemctl enable fail2ban
+sudo systemctl start fail2ban
+
+# Setup log rotation
+cat > /etc/logrotate.d/odm << EOF
+/opt/odm/logs/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    sharedscripts
+    postrotate
+        pm2 reloadLogs
+    endscript
+}
+EOF
+```
+
+#### Production Monitoring Setup
+
+```bash
+# Install monitoring tools
+sudo apt-get install -y htop iotop nethogs
+
+# Setup system monitoring
+cat > /opt/odm/scripts/health-check.sh << EOF
+#!/bin/bash
+# System health check script
+
+LOG_FILE="/opt/odm/logs/health-check.log"
+DATE=\$(date '+%Y-%m-%d %H:%M:%S')
+
+echo "[\$DATE] Starting health check" >> \$LOG_FILE
+
+# Check disk space
+DISK_USAGE=\$(df /opt/odm | tail -1 | awk '{print \$5}' | sed 's/%//')
+if [ \$DISK_USAGE -gt 80 ]; then
+    echo "[\$DATE] WARNING: Disk usage is \$DISK_USAGE%" >> \$LOG_FILE
+fi
+
+# Check memory usage
+MEM_USAGE=\$(free | grep Mem | awk '{printf "%.2f", \$3/\$2 * 100.0}')
+if [ \${MEM_USAGE%.*} -gt 80 ]; then
+    echo "[\$DATE] WARNING: Memory usage is \$MEM_USAGE%" >> \$LOG_FILE
+fi
+
+# Check application status
+if ! pm2 describe odm-app > /dev/null 2>&1; then
+    echo "[\$DATE] ERROR: Application is not running" >> \$LOG_FILE
+    pm2 start ecosystem.config.js
+fi
+
+# Check WebSocket status
+if ! pm2 describe odm-websocket > /dev/null 2>&1; then
+    echo "[\$DATE] ERROR: WebSocket server is not running" >> \$LOG_FILE
+    pm2 start ecosystem.config.js --only odm-websocket
+fi
+
+# Check download engines
+if ! /opt/odm/bin/yt-dlp --version > /dev/null 2>&1; then
+    echo "[\$DATE] ERROR: yt-dlp is not working" >> \$LOG_FILE
+fi
+
+echo "[\$DATE] Health check completed" >> \$LOG_FILE
+EOF
+
+chmod +x /opt/odm/scripts/health-check.sh
+
+# Setup cron job for health checks
+echo "*/5 * * * * /opt/odm/scripts/health-check.sh" | sudo -u odm crontab -
+```
+
+#### Production Backup Strategy
+
+```bash
+# Create backup script
+cat > /opt/odm/scripts/backup.sh << EOF
+#!/bin/bash
+# Backup script for ODM
+
+BACKUP_DIR="/opt/odm/backups"
+DATE=\$(date '+%Y%m%d_%H%M%S')
+BACKUP_FILE="odm_backup_\$DATE.tar.gz"
+
+# Create backup
+cd /opt/odm
+tar -czf "\$BACKUP_DIR/\$BACKUP_FILE" \
+    --exclude='downloads' \
+    --exclude='logs' \
+    --exclude='backups' \
+    --exclude='node_modules' \
+    .
+
+# Keep only last 7 days of backups
+find \$BACKUP_DIR -name "odm_backup_*.tar.gz" -mtime +7 -delete
+
+echo "Backup created: \$BACKUP_FILE"
+EOF
+
+chmod +x /opt/odm/scripts/backup.sh
+
+# Setup daily backup
+echo "0 2 * * * /opt/odm/scripts/backup.sh" | sudo -u odm crontab -
 ```
 
 ## Implementation Examples
