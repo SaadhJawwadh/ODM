@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { spawn } from 'child_process'
 import { readFile, unlink, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { promisify } from 'util'
 import { broadcast } from '@/lib/websocket'
-import YTDlpWrap from 'yt-dlp-wrap'
-
-const ytDlpWrap = new YTDlpWrap()
+import { ensureYtDlp } from '@/lib/yt-dlp-downloader'
 
 const readFileAsync = promisify(readFile)
 const unlinkAsync = promisify(unlink)
@@ -99,23 +98,19 @@ try {
 
 export async function POST(request: NextRequest) {
     try {
+        const ytDlpPath = await ensureYtDlp();
         const { url, format, quality, audioOnly, subtitles, thumbnails, id } = await request.json()
 
         if (!url || !id) {
             return NextResponse.json({ error: 'URL and ID are required' }, { status: 400 })
         }
 
-        const videoInfo = await ytDlpWrap.getVideoInfo(url);
-        const title = videoInfo.title || 'video';
-        const outputTemplate = `./temp/${title}.%(ext)s`;
-
         // Build yt-dlp command to download to temp directory
         const args = [
             '--newline',
             '--no-warnings',
             '--progress',
-            '--progress-template', '"%(progress)j"',
-            '--output', outputTemplate
+            '--output', `./temp/%(title)s.%(ext)s`
         ]
 
         if (audioOnly) {
@@ -152,10 +147,10 @@ export async function POST(request: NextRequest) {
 
         args.push(url)
 
-        console.log('yt-dlp command:', 'yt-dlp', args.join(' '))
+        console.log('yt-dlp command:', ytDlpPath, args.join(' '))
 
-        // Get the singleton instance of YTDlpWrap
-        const downloadProcess = ytDlpWrap.exec(args)
+        // Start download process
+        const downloadProcess = spawn(ytDlpPath, args)
 
         // Store the process
         activeDownloads.set(id, {
@@ -164,54 +159,75 @@ export async function POST(request: NextRequest) {
             progress: 0,
             speed: '',
             eta: '',
-            fileName: `${title}.${videoInfo.ext || 'mp4'}`,
+            fileName: '',
             fileSize: '',
             filePath: '',
-            abortController: downloadProcess.controller
+            abortController: null
         })
 
-        // Handle progress updates using the 'progress' event from yt-dlp-wrap
-        downloadProcess.on('progress', (progress) => {
-            const download = activeDownloads.get(id)
-            if (!download) return
+        // Handle progress updates
+        downloadProcess.stdout.on('data', (data: Buffer) => {
+            const output = data.toString()
+            console.log(`Download output for ${id}:`, output)
+            const lines = output.split('\n').filter(line => line.trim())
 
-            download.progress = progress.percent;
-            download.speed = progress.currentSpeed;
-            download.eta = progress.eta;
-            download.fileSize = progress.totalSize;
+            for (const line of lines) {
+                const download = activeDownloads.get(id)
+                if (!download) continue
 
-            broadcast({ type: 'progress', id, ...download })
-        });
+                // Extract progress information
+                if (line.includes('%')) {
+                    const progressMatch = line.match(/(\d+\.?\d*)%/)
+                    const speedMatch = line.match(/(\d+\.?\d*\w+\/s)/)
+                    const etaMatch = line.match(/ETA (\d+:\d+)/)
+                    const sizeMatch = line.match(/of\s+(\d+\.?\d*\w+)/)
 
-        // Handle metadata event to get filename
-        downloadProcess.on('ytDlpEvent', (eventType, eventData) => {
-            if (eventType === 'info') {
-                 const download = activeDownloads.get(id)
-                 if (!download) return
+                    if (progressMatch) {
+                        download.progress = parseFloat(progressMatch[1])
+                        download.speed = speedMatch ? speedMatch[1] : ''
+                        download.eta = etaMatch ? etaMatch[1] : ''
+                        download.fileSize = sizeMatch ? sizeMatch[1] : ''
+                        broadcast({ type: 'progress', id, ...download })
+                    }
+                }
 
-                 const data = JSON.parse(eventData);
-                 download.filePath = data._filename || ''; // yt-dlp often uses _filename for the final path
+                // Extract destination file path
+                if (line.includes('[download] Destination:')) {
+                    const pathMatch = line.match(/\[download\] Destination: (.+)/)
+                    if (pathMatch) {
+                        download.filePath = pathMatch[1].trim()
+                        download.fileName = pathMatch[1].split(/[\\/]/).pop() || ''
+                    }
+                }
+
+                // Check for completion
+                if (line.includes('100% of') && line.includes('in ')) {
+                    download.progress = 100
+                    download.status = 'ready'
+                    broadcast({ type: 'progress', id, ...download })
+                }
             }
-        });
+        })
 
-
-        downloadProcess.on('error', (error) => {
-            console.error(`Download error for ${id}:`, error.message)
+        downloadProcess.stderr.on('data', (data: Buffer) => {
+            console.error(`Download error for ${id}:`, data.toString())
             const download = activeDownloads.get(id)
             if (download) {
                 download.status = 'error'
-                download.error = error.message
+                download.error = data.toString()
                 broadcast({ type: 'progress', id, ...download })
             }
-        });
+        })
 
-        downloadProcess.on('close', () => {
+        downloadProcess.on('close', (code: number) => {
             const download = activeDownloads.get(id)
             if (download) {
-                // If status is not already error, mark as ready
-                if (download.status !== 'error') {
+                if (code === 0) {
                     download.status = 'ready'
                     download.progress = 100
+                } else {
+                    download.status = 'error'
+                    download.error = `Process exited with code ${code}`
                 }
                 broadcast({ type: 'progress', id, ...download })
             }
@@ -220,7 +236,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, id })
     } catch (error) {
         console.error('Download start error:', error)
-        return NextResponse.json({ error: 'Failed to start download' }, { status: 500 })
+        const errorMessage = error instanceof Error ? error.message : 'Failed to start download';
+        return NextResponse.json({ error: errorMessage }, { status: 500 })
     }
 }
 

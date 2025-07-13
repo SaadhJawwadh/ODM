@@ -34,9 +34,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# downloads
-/downloads/*
-!/downloads/.gitkeep
+# temp files
+/temp
+/downloads
+/bin
 
 # logs
 logs
